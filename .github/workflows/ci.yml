@@ -1,0 +1,50 @@
+name: CI & Quality Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js v20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Clean Architecture Boundary Lint (DEV-001)
+        run: npm run lint:arch
+
+      - name: Unit & Contract Tests (DEV-005)
+        run: npm run test:unit
+
+      - name: Hybrid Retrieval Regression Suite (RET-006)
+        run: npm run test:retrieval
+
+      - name: Prompt Injection Security Suite (OBS-005)
+        run: npm run test:security
+
+      - name: Corpus Floor Validation (ING-008)
+        run: npm run test:corpus
+
+      - name: Golden Q/A Benchmark Evaluation (OBS-004)
+        run: npm run eval
+
+      - name: Mandatory Twist Evaluation Slice (TW-006)
+        run: npm run eval:twist
+
+      - name: Secret Scan (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
