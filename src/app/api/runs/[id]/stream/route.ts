@@ -42,7 +42,8 @@ export async function GET(
           (progress) => {
             sendEvent(progress.type, progress);
           },
-          signal
+          signal,
+          run.filters as any
         );
       } catch (err: any) {
         sendEvent("error", { message: err.message });

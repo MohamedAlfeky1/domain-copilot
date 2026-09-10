@@ -7,6 +7,7 @@
 import { IDatabasePort } from "../ports/database.port";
 import { IAIProviderPort } from "../ports/ai-provider.port";
 import { HybridRetrievalService, RetrievalResult } from "../retrieval/retrieval.service";
+import { RetrievalScopeFilter } from "../ports/vector-store.port";
 import { ToolRegistry } from "./tool-registry";
 import { ACTIVE_VARIANT } from "../../../config/variant.config";
 import { Run, RunStep, Citation } from "../../domain/types";
@@ -37,7 +38,8 @@ export class MultiAgentOrchestrator {
     sessionId: string,
     correlationId: string,
     emitEvent?: (event: AgentProgressEvent) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    filters?: RetrievalScopeFilter
   ): Promise<{ finalAnswer: string; citations: Citation[]; status: Run["status"]; refusalReason?: string }> {
     const specialists = ACTIVE_VARIANT.domainName
       ? [
@@ -87,8 +89,8 @@ export class MultiAgentOrchestrator {
     try {
       // Step 1: Retrieval Phase
       const startRet = Date.now();
-      const retStep = await createStep("Retrieval Engine", "RETRIEVAL", { query });
-      const retrievalResult: RetrievalResult = await this.retriever.retrieve(query);
+      const retStep = await createStep("Retrieval Engine", "RETRIEVAL", { query, filters });
+      const retrievalResult: RetrievalResult = await this.retriever.retrieve(query, filters, correlationId);
       await completeStep(retStep, retrievalResult.trace, Date.now() - startRet);
 
       // Emit citations immediately

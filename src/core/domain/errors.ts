@@ -18,6 +18,11 @@ export class ValidationError extends DomainError {
   readonly httpStatus = 400;
 }
 
+export class IncompatibleFilterScopeError extends DomainError {
+  readonly code = "INCOMPATIBLE_FILTER_SCOPE";
+  readonly httpStatus = 400;
+}
+
 export class UnsupportedFileTypeError extends DomainError {
   readonly code = "UNSUPPORTED_FILE_TYPE";
   readonly httpStatus = 400;

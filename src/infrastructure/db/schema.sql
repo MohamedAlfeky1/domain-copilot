@@ -3,15 +3,7 @@
 -- ==============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
--- Create vector extension if available in environment (e.g. pgvector)
-DO $$
-BEGIN
-    CREATE EXTENSION IF NOT EXISTS "vector";
-EXCEPTION
-    WHEN OTHERS THEN
-        RAISE NOTICE 'vector extension not available; using fallback text/array representation';
-END
-$$;
+CREATE EXTENSION IF NOT EXISTS "vector";
 
 -- 1. Users table (Server-side Auth & RBAC)
 CREATE TABLE IF NOT EXISTS users (
@@ -82,12 +74,13 @@ CREATE TABLE IF NOT EXISTS chunk_embeddings (
     chunk_id UUID NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
     model VARCHAR(100) NOT NULL,
     dimension INTEGER NOT NULL,
-    vector TEXT NOT NULL, -- Stored as formatted vector string or pgvector type
+    vector vector(1536) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_chunk_model UNIQUE (chunk_id, model)
 );
 
 CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON chunk_embeddings(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_embeddings_vector_cosine ON chunk_embeddings USING hnsw (vector vector_cosine_ops);
 
 -- 7. Ingestion Jobs table (Pipeline state)
 CREATE TABLE IF NOT EXISTS ingestion_jobs (

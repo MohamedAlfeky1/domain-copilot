@@ -7,10 +7,22 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { query, sessionId } = body;
+    const { query, sessionId, filters } = body;
 
     if (!query || query.trim().length === 0) {
       return NextResponse.json({ error: "Query cannot be empty" }, { status: 400 });
+    }
+
+    // Validate scope filter immediately to fail fast with 400 if incompatible
+    if (filters) {
+      try {
+        (container.db as any).validateScopeFilter?.(filters);
+      } catch (err: any) {
+        if (err.name === "IncompatibleFilterScopeError") {
+          return NextResponse.json({ error: err.message }, { status: 400 });
+        }
+        throw err;
+      }
     }
 
     const runId = `run-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -23,6 +35,7 @@ export async function POST(req: NextRequest) {
       correlationId,
       query,
       status: "STARTED",
+      filters: filters || undefined,
       citations: [],
       startedAt: new Date().toISOString(),
     });

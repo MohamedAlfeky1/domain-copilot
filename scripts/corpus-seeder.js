@@ -7,7 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const DOMAIN_TOPICS = [
+const FALLBACK_DOMAIN_TOPICS = [
   { title: "Clinical Protocol: First-Line Cardiovascular Interventions", category: "Cardiology", pages: 6 },
   { title: "Clinical Protocol: Anticoagulation Dosing & Contraindication Guidelines", category: "Hematology", pages: 6 },
   { title: "Clinical Protocol: Pediatric Antimicrobial Stewardship & Dosage Tables", category: "Pediatrics", pages: 5 },
@@ -41,6 +41,9 @@ const DOMAIN_TOPICS = [
   { title: "Clinical Protocol: Antimicrobial Resistance Surveillance Protocol", category: "Microbiology", pages: 5 },
   { title: "Clinical Protocol: Palliative Symptom Management Guidelines", category: "Palliative Care", pages: 5 },
 ];
+
+const manifest = require("./seed-manifest.json");
+const DOMAIN_TOPICS = manifest.documents || FALLBACK_DOMAIN_TOPICS;
 
 function generateDocumentContent(topic) {
   let content = `# ${topic.title}\n\n`;
@@ -101,7 +104,7 @@ async function seed() {
   console.log(`Total Pages Seeded:     ${totalPages} (Floor Requirement: >= 150)`);
   console.log("========================================================");
 
-  if (totalDocs < 30 || totalPages < 150) {
+  if (totalDocs < manifest.minimumDocuments || totalPages < manifest.minimumPages) {
     console.error("FATAL: Corpus seeder failed to meet the minimum floor requirements!");
     process.exit(1);
   }

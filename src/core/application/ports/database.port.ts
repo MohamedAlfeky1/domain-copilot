@@ -29,9 +29,11 @@ export interface IDatabasePort {
   saveDocument(doc: Document): Promise<Document>;
   getDocumentById(id: string): Promise<Document | null>;
   getDocumentByHash(contentHash: string): Promise<Document | null>;
+  getDocumentBySource(source: string, name: string): Promise<Document | null>;
   listDocuments(): Promise<Document[]>;
   saveDocumentVersion(version: DocumentVersion): Promise<DocumentVersion>;
   getActiveVersion(documentId: string): Promise<DocumentVersion | null>;
+  archiveActiveVersions(documentId: string): Promise<void>;
 
   // Chunks
   saveChunks(chunks: Chunk[]): Promise<void>;
@@ -41,6 +43,7 @@ export interface IDatabasePort {
 
   // Ingestion Jobs
   saveIngestionJob(job: IngestionJob): Promise<IngestionJob>;
+  getIngestionJob(id: string): Promise<IngestionJob | null>;
   updateIngestionJob(job: Partial<IngestionJob> & { id: string }): Promise<void>;
   listIngestionJobs(): Promise<IngestionJob[]>;
 
