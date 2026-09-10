@@ -8,6 +8,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const manifest = require("./seed-manifest.json");
 
 function validateCorpus() {
   const fixturesDir = path.join(__dirname, "../fixtures/corpus");
@@ -47,7 +48,7 @@ function validateCorpus() {
   console.log(`PII Audit:       ${piiDetected ? "FAIL (PII detected)" : "PASS (Clean Synthetic Data)"}`);
   console.log("=================================================");
 
-  if (totalDocs < 30 || totalPages < 150 || piiDetected) {
+  if (totalDocs < manifest.minimumDocuments || totalPages < manifest.minimumPages || piiDetected) {
     console.error("Corpus validation FAILED!");
     process.exit(1);
   } else {

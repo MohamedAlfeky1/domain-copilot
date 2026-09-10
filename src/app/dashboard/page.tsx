@@ -16,6 +16,7 @@ import {
 
 export default function DashboardPage() {
   const [documents, setDocuments] = useState<any[]>([]);
+  const [jobs, setJobs] = useState<any[]>([]);
   const [totalChunks, setTotalChunks] = useState(0);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -28,6 +29,7 @@ export default function DashboardPage() {
       const res = await fetch("/api/documents");
       const data = await res.json();
       setDocuments(data.documents || []);
+      setJobs(data.jobs || []);
       setTotalChunks(data.totalChunksIndexed || 0);
     } catch (err) {
       console.error("Failed to fetch documents", err);
@@ -38,7 +40,22 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchCorpus();
+    const timer = window.setInterval(fetchCorpus, 3000);
+    return () => window.clearInterval(timer);
   }, []);
+
+  const retryDocument = async (doc: any) => {
+    try {
+      const res = await fetch(`/api/documents/${doc.id}/reingest`, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body.error || "Retry failed");
+      }
+      await fetchCorpus();
+    } catch (error: any) {
+      alert(`Retry error: ${error.message}`);
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -80,6 +97,7 @@ export default function DashboardPage() {
 
   const totalPages = documents.reduce((acc, d) => acc + (d.sizeBytes ? Math.max(1, Math.ceil(d.sizeBytes / 2500)) : 1), 0);
   const failureCount = documents.filter((d) => d.status === "FAILED").length;
+  const selectedJob = selectedDoc ? jobs.find((item) => item.documentVersionId === selectedDoc.currentVersionId) : null;
 
   return (
     <div className="space-y-6">
@@ -236,14 +254,15 @@ export default function DashboardPage() {
                   <th className="py-3 px-4">Document Name</th>
                   <th className="py-3 px-4">MIME / Format</th>
                   <th className="py-3 px-4">Size</th>
-                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Pipeline status</th>
                   <th className="py-3 px-4">Ingested At</th>
                   <th className="py-3 px-4 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800 text-slate-300">
-                {documents.map((doc) => (
-                  <tr key={doc.id} className="hover:bg-slate-800/40 transition-colors">
+                {documents.map((doc) => {
+                  const job = jobs.find((item) => item.documentVersionId === doc.currentVersionId);
+                  return <tr key={doc.id} className="hover:bg-slate-800/40 transition-colors">
                     <td className="py-3 px-4 font-medium text-white flex items-center gap-2">
                       <FileText className="w-4 h-4 text-sky-400 shrink-0" />
                       <span className="truncate max-w-xs">{doc.name}</span>
@@ -255,7 +274,7 @@ export default function DashboardPage() {
                     <td className="py-3 px-4">
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                         <CheckCircle2 className="w-3 h-3" />
-                        {doc.status}
+                        {job ? `${job.stage} ${job.progressPct}% · ${job.status}` : doc.status}
                       </span>
                     </td>
                     <td className="py-3 px-4 font-mono text-slate-400">
@@ -268,9 +287,17 @@ export default function DashboardPage() {
                       >
                         Inspect Chunks
                       </button>
+                      {doc.status === "FAILED" && (
+                        <button
+                          onClick={() => retryDocument(doc)}
+                          className="ml-2 px-2.5 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs transition-colors"
+                        >
+                          Retry
+                        </button>
+                      )}
                     </td>
-                  </tr>
-                ))}
+                  </tr>;
+                })}
               </tbody>
             </table>
           </div>
@@ -297,6 +324,13 @@ export default function DashboardPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {selectedJob?.status === "FAILED" && (
+                <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-xs text-rose-200">
+                  <p className="font-semibold">{selectedJob.errorCode || "INGESTION_FAILED"}</p>
+                  <p className="mt-1">{selectedJob.errorMessage || "The pipeline failed without an error message."}</p>
+                  <button onClick={() => retryDocument(selectedDoc)} className="mt-2 px-2.5 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-100">Retry original upload</button>
+                </div>
+              )}
               {docChunks.map((chunk, idx) => (
                 <div
                   key={chunk.id}

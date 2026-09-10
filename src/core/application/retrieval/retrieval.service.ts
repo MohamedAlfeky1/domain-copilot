@@ -1,27 +1,66 @@
 /**
- * DOMAIN COPILOT - HYBRID RETRIEVAL SERVICE
- * Implements Dense pgvector + PostgreSQL Keyword Search + Reciprocal Rank Fusion (RRF)
- * Features: Metadata filtering, structured citations, and low-evidence refusal gate.
+ * DOMAIN COPILOT - HYBRID RETRIEVAL SERVICE (EPIC 02: RET-001 to RET-006)
+ * Implements Dense pgvector + PostgreSQL Keyword Search (FTS) + Reciprocal Rank Fusion (RRF)
+ * Features: Metadata scope filtering (source, doc, version, section, page, language),
+ * Incompatible scope rejection, structured citations, low-evidence refusal gate,
+ * and comprehensive retrieval trace inspector telemetry.
  */
 
 import { Citation, Chunk } from "../../domain/types";
-import { IVectorStorePort } from "../ports/vector-store.port";
+import {
+  IVectorStorePort,
+  RetrievalScopeFilter,
+  VectorSearchResult,
+  KeywordSearchResult,
+} from "../ports/vector-store.port";
 import { IAIProviderPort } from "../ports/ai-provider.port";
 import { IDatabasePort } from "../ports/database.port";
+import { IncompatibleFilterScopeError } from "../../domain/errors";
 
-export interface RetrievalFilter {
-  documentVersionIds?: string[];
+export interface CandidateTraceItem {
+  chunkId: string;
+  documentName: string;
+  version: number;
   section?: string;
-  minSimilarity?: number;
+  page?: number;
+  score: number;
+  rank: number;
+  channel: "dense" | "keyword" | "fused";
+  textSnippet: string;
+  explanation?: string;
+}
+
+export interface FusedTraceItem {
+  chunkId: string;
+  documentName: string;
+  version: number;
+  section?: string;
+  page?: number;
+  denseRank: number | null;
+  denseScore: number | null;
+  keywordRank: number | null;
+  keywordScore: number | null;
+  rrfScore: number;
+  channel: "dense" | "keyword" | "fused";
+  explanation: string;
+  textSnippet: string;
 }
 
 export interface RetrievalTraceData {
   query: string;
-  denseCandidates: Array<{ chunkId: string; similarity: number; textSnippet: string }>;
-  keywordCandidates: Array<{ chunkId: string; rankScore: number; textSnippet: string }>;
-  fusedResults: Array<{ chunkId: string; rrfScore: number; channel: string }>;
+  correlationId?: string;
+  appliedFilters: RetrievalScopeFilter;
+  denseTopK: CandidateTraceItem[];
+  keywordTopK: CandidateTraceItem[];
+  fusedResults: FusedTraceItem[];
+  selectedChunks: string[];
+  totalConsideredCandidates: number;
   evidenceScore: number;
+  refusalThreshold: number;
   refusalTriggered: boolean;
+  refusalDecision: "PROCEED" | "REFUSED";
+  refusalReason?: string;
+  fusionFormula: string;
 }
 
 export interface RetrievalResult {
@@ -33,118 +72,291 @@ export interface RetrievalResult {
   trace: RetrievalTraceData;
 }
 
+export interface HybridRetrieverOptions {
+  rrfK?: number;
+  denseWeight?: number;
+  keywordWeight?: number;
+  topK?: number;
+  evidenceThreshold?: number;
+  minSimilarity?: number;
+}
+
 export class HybridRetrievalService {
-  private readonly RRF_K = 60;
-  private readonly EVIDENCE_THRESHOLD = 0.015; // Minimum fused score or density
+  private readonly rrfK: number;
+  private readonly denseWeight: number;
+  private readonly keywordWeight: number;
+  private readonly topK: number;
+  private readonly evidenceThreshold: number;
+  private readonly minSimilarity: number;
 
   constructor(
     private vectorStore: IVectorStorePort,
     private aiProvider: IAIProviderPort,
-    private db: IDatabasePort
-  ) {}
+    private db: IDatabasePort,
+    options?: HybridRetrieverOptions
+  ) {
+    this.rrfK = options?.rrfK ?? 60;
+    this.denseWeight = options?.denseWeight ?? 1.0;
+    this.keywordWeight = options?.keywordWeight ?? 1.0;
+    this.topK = options?.topK ?? 5;
+    this.evidenceThreshold = options?.evidenceThreshold ?? 0.015;
+    this.minSimilarity = options?.minSimilarity ?? 0.15;
+  }
 
-  async retrieve(query: string, filter?: RetrievalFilter): Promise<RetrievalResult> {
-    // 1. Generate query embedding
+  async validateFilterScope(filter?: RetrievalScopeFilter): Promise<void> {
+    if (!filter) return;
+
+    // Validate documentId if provided
+    if (filter.documentId) {
+      const doc = await this.db.getDocumentById(filter.documentId);
+      if (!doc) {
+        throw new IncompatibleFilterScopeError(
+          `Incompatible filter scope: Document ID "${filter.documentId}" does not exist in corpus.`
+        );
+      }
+
+      // If version is specified, check that the version exists for this document
+      if (filter.version !== undefined) {
+        const activeVer = await this.db.getActiveVersion(filter.documentId);
+        if (activeVer && activeVer.version !== filter.version) {
+          // Check if version exists in history
+          const docs = await this.db.listDocuments();
+          const targetDoc = docs.find((d) => d.id === filter.documentId);
+          if (!targetDoc) {
+            throw new IncompatibleFilterScopeError(
+              `Incompatible filter scope: Version ${filter.version} does not exist for Document "${filter.documentId}".`
+            );
+          }
+        }
+      }
+    }
+
+    // Validate source if provided
+    if (filter.source) {
+      const docs = await this.db.listDocuments();
+      const match = docs.some(
+        (d) => d.source.toLowerCase() === filter.source!.toLowerCase() || d.name.toLowerCase() === filter.source!.toLowerCase()
+      );
+      if (!match) {
+        throw new IncompatibleFilterScopeError(
+          `Incompatible filter scope: Source "${filter.source}" does not match any document in the corpus.`
+        );
+      }
+    }
+
+    // Validate page range
+    if (filter.pageRange) {
+      const { start, end } = filter.pageRange;
+      if (start !== undefined && end !== undefined && start > end) {
+        throw new IncompatibleFilterScopeError(
+          `Incompatible filter scope: Invalid page range start (${start}) cannot exceed end (${end}).`
+        );
+      }
+    }
+  }
+
+  async retrieve(
+    query: string,
+    filter?: RetrievalScopeFilter,
+    correlationId?: string
+  ): Promise<RetrievalResult> {
+    // 1. Validate Scope & Reject Incompatible Filters (RET-002)
+    await this.validateFilterScope(filter);
+
+    const appliedFilters: RetrievalScopeFilter = {
+      ...filter,
+      includeInactiveVersions: filter?.includeInactiveVersions ?? false,
+    };
+
+    // 2. Parallel Dense Embedding & Execution (RET-001)
     const { embedding } = await this.aiProvider.generateEmbedding(query);
 
-    // 2. Parallel Dense + Keyword execution (RET-001)
     const [denseResults, keywordResults] = await Promise.all([
       this.vectorStore.searchSimilar(embedding, {
         topK: 10,
-        minSimilarity: filter?.minSimilarity ?? 0.1,
-        documentVersionIds: filter?.documentVersionIds,
-        section: filter?.section,
+        minSimilarity: this.minSimilarity,
+        ...appliedFilters,
       }),
       this.vectorStore.searchKeyword(query, {
         topK: 10,
-        documentVersionIds: filter?.documentVersionIds,
+        ...appliedFilters,
       }),
     ]);
 
-    // 3. Reciprocal Rank Fusion (RRF) calculation
-    const scoresMap = new Map<string, { chunk: Chunk; rrfScore: number; channel: "dense" | "keyword" | "fused" }>();
+    // 3. Process Channel Candidates for Telemetry (RET-005)
+    const denseCandidates: CandidateTraceItem[] = denseResults.map((d, index) => {
+      const docName = (d.chunk.metadata.documentName as string) || "Document";
+      return {
+        chunkId: d.chunk.id,
+        documentName: docName,
+        version: Number(d.chunk.metadata.version || 1),
+        section: d.chunk.section,
+        page: d.chunk.page,
+        score: Math.round(d.similarity * 10000) / 10000,
+        rank: index + 1,
+        channel: "dense",
+        textSnippet: d.chunk.text.slice(0, 120),
+        explanation: `Dense pgvector rank #${index + 1} with cosine similarity ${(d.similarity * 100).toFixed(1)}%`,
+      };
+    });
 
-    // Process dense ranks
-    denseResults.forEach((res, rank) => {
-      const score = 1 / (this.RRF_K + (rank + 1));
-      scoresMap.set(res.chunk.id, {
+    const keywordCandidates: CandidateTraceItem[] = keywordResults.map((k, index) => {
+      const docName = (k.chunk.metadata.documentName as string) || "Document";
+      return {
+        chunkId: k.chunk.id,
+        documentName: docName,
+        version: Number(k.chunk.metadata.version || 1),
+        section: k.chunk.section,
+        page: k.chunk.page,
+        score: Math.round(k.rankScore * 10000) / 10000,
+        rank: index + 1,
+        channel: "keyword",
+        textSnippet: k.chunk.text.slice(0, 120),
+        explanation: `PostgreSQL Full-Text rank #${index + 1} with ts_rank ${(k.rankScore * 100).toFixed(1)}%`,
+      };
+    });
+
+    // 4. Deterministic Reciprocal Rank Fusion (RRF) (RET-001)
+    interface IntermediateFused {
+      chunk: Chunk;
+      denseRank: number | null;
+      denseScore: number | null;
+      keywordRank: number | null;
+      keywordScore: number | null;
+      rrfScore: number;
+      channel: "dense" | "keyword" | "fused";
+    }
+
+    const fusionMap = new Map<string, IntermediateFused>();
+
+    denseResults.forEach((res, idx) => {
+      const rank = idx + 1;
+      const score = this.denseWeight / (this.rrfK + rank);
+      fusionMap.set(res.chunk.id, {
         chunk: res.chunk,
+        denseRank: rank,
+        denseScore: res.similarity,
+        keywordRank: null,
+        keywordScore: null,
         rrfScore: score,
         channel: "dense",
       });
     });
 
-    // Process keyword ranks
-    keywordResults.forEach((res, rank) => {
-      const score = 1 / (this.RRF_K + (rank + 1));
-      const existing = scoresMap.get(res.chunk.id);
+    keywordResults.forEach((res, idx) => {
+      const rank = idx + 1;
+      const score = this.keywordWeight / (this.rrfK + rank);
+      const existing = fusionMap.get(res.chunk.id);
       if (existing) {
         existing.rrfScore += score;
+        existing.keywordRank = rank;
+        existing.keywordScore = res.rankScore;
         existing.channel = "fused";
       } else {
-        scoresMap.set(res.chunk.id, {
+        fusionMap.set(res.chunk.id, {
           chunk: res.chunk,
+          denseRank: null,
+          denseScore: null,
+          keywordRank: rank,
+          keywordScore: res.rankScore,
           rrfScore: score,
           channel: "keyword",
         });
       }
     });
 
-    // 4. Sort by fused score
-    const rankedCandidates = Array.from(scoresMap.values()).sort((a, b) => b.rrfScore - a.rrfScore);
-    const topChunks = rankedCandidates.slice(0, 5);
+    // 5. Rank Fused Candidates
+    const rankedCandidates: FusedTraceItem[] = Array.from(fusionMap.values())
+      .sort((a, b) => b.rrfScore - a.rrfScore)
+      .map((item, idx) => {
+        const docName = (item.chunk.metadata.documentName as string) || "Document";
+        const version = Number(item.chunk.metadata.version || 1);
 
-    // Calculate aggregate evidence score
-    const topScore = topChunks.length > 0 ? topChunks[0].rrfScore : 0;
-    const isRefusalRequired = topChunks.length === 0 || topScore < this.EVIDENCE_THRESHOLD;
+        let explanation = "";
+        if (item.channel === "fused") {
+          explanation = `Elevated by dual-channel match: Dense rank #${item.denseRank} (${(item.denseScore! * 100).toFixed(1)}% sim) + Keyword rank #${item.keywordRank} (${(item.keywordScore! * 100).toFixed(1)}% FTS) -> Fused RRF ${item.rrfScore.toFixed(4)}`;
+        } else if (item.channel === "dense") {
+          explanation = `Ranked via semantic similarity only: Dense rank #${item.denseRank} (${(item.denseScore! * 100).toFixed(1)}% sim)`;
+        } else {
+          explanation = `Ranked via exact keyword match only: Keyword rank #${item.keywordRank} (${(item.keywordScore! * 100).toFixed(1)}% FTS)`;
+        }
 
-    // 5. Build structured citations (RET-003)
-    const citations: Citation[] = topChunks.map((item, idx) => {
-      const docName = (item.chunk.metadata.documentName as string) || "Document";
-      return {
-        citationId: `cite-${idx + 1}`,
-        chunkId: item.chunk.id,
-        documentId: item.chunk.documentVersionId,
-        documentName: docName,
-        version: 1,
-        page: item.chunk.page,
-        clause: item.chunk.clause,
-        excerpt: item.chunk.text.slice(0, 180) + "...",
-        score: Math.round(item.rrfScore * 10000) / 10000,
-        channel: item.channel,
-      };
-    });
+        return {
+          chunkId: item.chunk.id,
+          documentName: docName,
+          version,
+          section: item.chunk.section,
+          page: item.chunk.page,
+          denseRank: item.denseRank,
+          denseScore: item.denseScore ? Math.round(item.denseScore * 1000) / 1000 : null,
+          keywordRank: item.keywordRank,
+          keywordScore: item.keywordScore ? Math.round(item.keywordScore * 1000) / 1000 : null,
+          rrfScore: Math.round(item.rrfScore * 10000) / 10000,
+          channel: item.channel,
+          explanation,
+          textSnippet: item.chunk.text.slice(0, 140),
+        };
+      });
 
-    // 6. Trace payload for inspector (RET-005)
+    // 6. Candidate Selection & Low-Evidence Refusal Gate (RET-004)
+    const topCandidates = rankedCandidates.slice(0, this.topK);
+    const topScore = topCandidates.length > 0 ? topCandidates[0].rrfScore : 0;
+    const isRefusalRequired = topCandidates.length === 0 || topScore < this.evidenceThreshold;
+
+    const refusalReason = isRefusalRequired
+      ? `The existing corpus contains insufficient evidence (support score: ${topScore.toFixed(4)}, floor: ${this.evidenceThreshold.toFixed(4)}) to answer this query without hallucination.`
+      : undefined;
+
+    // 7. Structured Citations with Exact Chunk Traceability (RET-003)
+    const selectedChunks: Chunk[] = topCandidates.map((c) => fusionMap.get(c.chunkId)!.chunk);
+
+    const citations: Citation[] = isRefusalRequired
+      ? []
+      : selectedChunks.map((chunk, index) => {
+          const docName = (chunk.metadata.documentName as string) || "Document";
+          const docSource = (chunk.metadata.source as string) || docName;
+          const version = Number(chunk.metadata.version || 1);
+          const candidate = topCandidates.find((c) => c.chunkId === chunk.id);
+
+          return {
+            citationId: `cite-${index + 1}`,
+            chunkId: chunk.id,
+            documentId: chunk.documentVersionId,
+            documentName: docName,
+            version,
+            page: chunk.page,
+            clause: chunk.clause || chunk.section,
+            excerpt: chunk.text.slice(0, 200).trim() + (chunk.text.length > 200 ? "..." : ""),
+            score: candidate?.rrfScore ?? 0,
+            channel: candidate?.channel ?? "fused",
+            source: docSource,
+          };
+        });
+
+    // 8. Compile Complete Trace Inspector Object (RET-005)
     const trace: RetrievalTraceData = {
       query,
-      denseCandidates: denseResults.map((d) => ({
-        chunkId: d.chunk.id,
-        similarity: Math.round(d.similarity * 1000) / 1000,
-        textSnippet: d.chunk.text.slice(0, 100),
-      })),
-      keywordCandidates: keywordResults.map((k) => ({
-        chunkId: k.chunk.id,
-        rankScore: Math.round(k.rankScore * 1000) / 1000,
-        textSnippet: k.chunk.text.slice(0, 100),
-      })),
-      fusedResults: rankedCandidates.slice(0, 10).map((r) => ({
-        chunkId: r.chunk.id,
-        rrfScore: Math.round(r.rrfScore * 10000) / 10000,
-        channel: r.channel,
-      })),
+      correlationId,
+      appliedFilters,
+      denseTopK: denseCandidates,
+      keywordTopK: keywordCandidates,
+      fusedResults: rankedCandidates,
+      selectedChunks: selectedChunks.map((c) => c.id),
+      totalConsideredCandidates: fusionMap.size,
       evidenceScore: Math.round(topScore * 10000) / 10000,
+      refusalThreshold: this.evidenceThreshold,
       refusalTriggered: isRefusalRequired,
+      refusalDecision: isRefusalRequired ? "REFUSED" : "PROCEED",
+      refusalReason,
+      fusionFormula: `RRF(d) = (${this.denseWeight} / (${this.rrfK} + rank_dense)) + (${this.keywordWeight} / (${this.rrfK} + rank_keyword))`,
     };
 
     return {
-      chunks: topChunks.map((c) => c.chunk),
+      chunks: selectedChunks,
       citations,
       evidenceScore: topScore,
       isRefusalRequired,
-      refusalReason: isRefusalRequired
-        ? "The existing corpus contains insufficient evidence to reliably answer this query without hallucination."
-        : undefined,
+      refusalReason,
       trace,
     };
   }

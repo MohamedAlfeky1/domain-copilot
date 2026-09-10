@@ -14,7 +14,7 @@ export interface User {
 }
 
 export type IngestionStage = "EXTRACT" | "CLEAN" | "CHUNK" | "EMBED" | "INDEX";
-export type IngestionStatus = "QUEUED" | "RUNNING" | "PROCESSING" | "COMPLETED" | "FAILED";
+export type IngestionStatus = "QUEUED" | "RUNNING" | "PROCESSING" | "COMPLETED" | "INDEXED" | "FAILED";
 
 export interface Document {
   id: string;
@@ -112,6 +112,7 @@ export interface Run {
   correlationId: string;
   query: string;
   status: RunStatus;
+  filters?: Record<string, any>;
   refusalReason?: string;
   finalOutput?: string;
   citations: Citation[];
