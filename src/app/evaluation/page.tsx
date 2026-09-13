@@ -106,7 +106,7 @@ export default function EvaluationPage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-purple-500/20 text-purple-400 font-semibold uppercase">
-              EPIC 07 &amp; OBS-004
+              BENCHMARK HARNESS
             </span>
             <span className="text-xs text-slate-400">
               Empirical PostgreSQL &amp; pgvector Golden Benchmark ({summary.totalTests} Q/A Pairs)
@@ -140,7 +140,7 @@ export default function EvaluationPage() {
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 font-mono">
           <span className="text-[10px] text-slate-500 uppercase">Golden Pass Rate</span>
           <p className="text-2xl font-bold text-emerald-400 mt-1">{summary.passRatePct}%</p>
-          <p className="text-[10px] text-emerald-500/80 mt-0.5">Floor target: &gt;= 80% (OBS-004)</p>
+          <p className="text-[10px] text-emerald-500/80 mt-0.5">Floor target: &gt;= 80%</p>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 font-mono">

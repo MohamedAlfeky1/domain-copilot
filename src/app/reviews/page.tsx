@@ -88,7 +88,7 @@ export default function ReviewsPage() {
 
   const handleReject = async () => {
     if (!selectedApproval || !rejectionReason.trim()) {
-      alert("Mandatory rejection reason is required (HITL-005).");
+      alert("Mandatory rejection reason is required.");
       return;
     }
     try {
@@ -113,9 +113,9 @@ export default function ReviewsPage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-500/20 text-amber-400 font-semibold uppercase">
-              EPIC 04
+              GOVERNANCE QUEUE
             </span>
-            <span className="text-xs text-slate-400">6 Stories · Consequential Work Governance</span>
+            <span className="text-xs text-slate-400">Consequential Action Governance</span>
           </div>
           <h2 className="text-xl font-bold text-white tracking-tight">Human-in-the-Loop (HITL) Review Queue</h2>
           <p className="text-xs text-slate-400 mt-1">
@@ -246,7 +246,7 @@ export default function ReviewsPage() {
                 <div className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 space-y-2">
                   <label className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
                     <AlertTriangle className="w-4 h-4" />
-                    Mandatory Rejection Reason (HITL-005):
+                    Mandatory Rejection Reason:
                   </label>
                   <input
                     type="text"

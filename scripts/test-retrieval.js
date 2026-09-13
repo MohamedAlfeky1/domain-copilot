@@ -17,7 +17,7 @@ const { vector } = require("@electric-sql/pglite/vector");
 
 async function runHybridRetrievalTestSuite() {
   console.log("================================================================================");
-  console.log("EPIC 02: GROUNDED HYBRID RETRIEVAL ENGINE REGRESSION SUITE (RET-001 to RET-006)");
+  console.log("GROUNDED HYBRID RETRIEVAL ENGINE REGRESSION SUITE");
   console.log("================================================================================");
 
   let passed = 0;

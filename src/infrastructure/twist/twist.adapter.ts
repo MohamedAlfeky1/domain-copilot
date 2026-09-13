@@ -1,5 +1,5 @@
 /**
- * DOMAIN COPILOT - MANDATORY TWIST IMPLEMENTATION ADAPTER (EPIC 06)
+ * DOMAIN COPILOT - MANDATORY TWIST IMPLEMENTATION ADAPTER
  * Encapsulates assigned Twist (T1: Deterministic Side-Effect Risk Guard)
  * Behind a clean boundary so business logic remains completely isolated.
  */
