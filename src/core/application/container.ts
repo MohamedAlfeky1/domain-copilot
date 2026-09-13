@@ -32,18 +32,19 @@ export interface AppContainer {
   twistAdapter: typeof twistAdapter;
 }
 
-declare global {
-  var __appContainerInstance: AppContainer | undefined;
-}
-
-const buildContainer = (): AppContainer => {
+export const buildContainer = (): AppContainer => {
+  const currentAiProvider = new OpenAIProviderAdapter(
+    process.env.OPENAI_API_KEY,
+    process.env.AI_MODEL || "gpt-4o",
+    process.env.EMBEDDING_MODEL || "text-embedding-3-small"
+  );
   toolRegistry.setTwistPort(twistAdapter);
-  const ingestionService = new IngestionService(dbAdapter, dbAdapter, aiProvider);
-  const retrievalService = new HybridRetrievalService(dbAdapter, aiProvider, dbAdapter);
+  const ingestionService = new IngestionService(dbAdapter, dbAdapter, currentAiProvider);
+  const retrievalService = new HybridRetrievalService(dbAdapter, currentAiProvider, dbAdapter);
   const approvalService = new ApprovalService(dbAdapter);
   const orchestratorService = new MultiAgentOrchestrator(
     dbAdapter,
-    aiProvider,
+    currentAiProvider,
     retrievalService,
     toolRegistry,
     approvalService,
@@ -53,7 +54,7 @@ const buildContainer = (): AppContainer => {
   return {
     db: dbAdapter,
     vectorStore: dbAdapter,
-    aiProvider,
+    aiProvider: currentAiProvider,
     ingestionService,
     retrievalService,
     orchestratorService,
@@ -63,10 +64,5 @@ const buildContainer = (): AppContainer => {
   };
 };
 
-export const container: AppContainer =
-  globalThis.__appContainerInstance ?? buildContainer();
-
-if (process.env.NODE_ENV !== "production") {
-  globalThis.__appContainerInstance = container;
-}
+export const container: AppContainer = buildContainer();
 
