@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { container } from "@/core/application/container";
 import { localStagingStorage } from "@/infrastructure/storage/local-staging.adapter";
+import { requireRole } from "@/infrastructure/auth/auth-guard";
 
 export const runtime = "nodejs";
 
@@ -9,6 +10,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
+    await requireRole(req, ["ADMIN", "APPROVER"]);
     const doc = await container.db.getDocumentById(params.id);
     if (!doc) {
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
@@ -36,6 +38,6 @@ export async function POST(
       status: result.document.status,
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: error.httpStatus || 500 });
   }
 }

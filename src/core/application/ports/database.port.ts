@@ -19,6 +19,15 @@ import {
   EvaluationResult,
 } from "../../domain/types";
 
+export interface DatabaseReadinessResult {
+  isReady: boolean;
+  database: "CONNECTED" | "DISCONNECTED";
+  pgvector: "READY" | "UNAVAILABLE";
+  totalChunks: number;
+  latencyMs: number;
+  details?: Record<string, unknown>;
+}
+
 export interface IDatabasePort {
   // Users
   getUserByEmail(email: string): Promise<User | null>;
@@ -78,4 +87,7 @@ export interface IDatabasePort {
   listEvaluationCases(): Promise<EvaluationCase[]>;
   saveEvaluationResult(result: EvaluationResult): Promise<void>;
   listEvaluationResults(): Promise<EvaluationResult[]>;
+
+  // Readiness & Health Check (OBS-006)
+  checkReadiness(): Promise<DatabaseReadinessResult>;
 }

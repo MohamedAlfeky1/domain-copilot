@@ -71,6 +71,8 @@ export default function RunTracePage() {
   }, [runIdParam]);
 
   const retrievalTrace = steps.find((s) => s.stepType === "RETRIEVAL")?.outputPayload;
+  const twistStep = steps.find((s) => s.stepType === "GUARDRAIL" || s.agent?.includes("Twist Guard"));
+  const twistData = twistStep?.outputPayload as any;
 
   return (
     <div className="space-y-6">
@@ -314,6 +316,63 @@ export default function RunTracePage() {
                   })}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* MANDATORY TWIST RISK GUARD TELEMETRY (TW-005 / TW-006) */}
+          {twistData && (
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-white font-mono flex items-center gap-2">
+                    <ShieldAlert className="w-4 h-4 text-sky-400" />
+                    MANDATORY TWIST RISK GUARD TELEMETRY (TW-001 to TW-006)
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Deterministic Side-Effect Risk Guard · Enforces assigned variant risk floor
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 font-mono text-xs">
+                  <span
+                    className={`px-2.5 py-1 rounded font-bold border ${
+                      twistData.isPermitted
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                        : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                    }`}
+                  >
+                    STATUS: {twistData.isPermitted ? "PERMITTED" : "GUARDED / BLOCKED"}
+                  </span>
+                  <span className="px-2.5 py-1 rounded bg-slate-800 text-sky-300 border border-slate-700">
+                    Risk Index: <strong>{twistData.computedRiskIndex}</strong> / Threshold: <strong>{twistData.threshold}</strong>
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
+                <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                  <span className="text-slate-500 text-[10px] uppercase font-bold">Enforced Domain Policy</span>
+                  <p className="text-slate-300">{twistData.enforcedPolicy || "Zero-tolerance off-label protocol variance"}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                  <span className="text-slate-500 text-[10px] uppercase font-bold">Execution Step</span>
+                  <p className="text-slate-300 font-semibold">{twistStep?.agent || "Mandatory Twist Guard"}</p>
+                </div>
+              </div>
+
+              {twistData.violations && twistData.violations.length > 0 && (
+                <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs font-mono space-y-1">
+                  <span className="text-rose-400 font-bold flex items-center gap-1.5">
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                    Risk Violations Detected:
+                  </span>
+                  <ul className="list-disc list-inside space-y-0.5 text-rose-300">
+                    {twistData.violations.map((v: string, i: number) => (
+                      <li key={i}>{v}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
 

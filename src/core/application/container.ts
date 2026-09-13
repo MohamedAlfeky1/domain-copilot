@@ -20,20 +20,53 @@ const aiProvider = new OpenAIProviderAdapter(
   process.env.EMBEDDING_MODEL || "text-embedding-3-small"
 );
 
-// 2. Application Services
-const ingestionService = new IngestionService(dbAdapter, dbAdapter, aiProvider);
-const retrievalService = new HybridRetrievalService(dbAdapter, aiProvider, dbAdapter);
-const orchestratorService = new MultiAgentOrchestrator(dbAdapter, aiProvider, retrievalService, toolRegistry);
-const approvalService = new ApprovalService(dbAdapter);
+export interface AppContainer {
+  db: typeof dbAdapter;
+  vectorStore: typeof dbAdapter;
+  aiProvider: OpenAIProviderAdapter;
+  ingestionService: IngestionService;
+  retrievalService: HybridRetrievalService;
+  orchestratorService: MultiAgentOrchestrator;
+  approvalService: ApprovalService;
+  toolRegistry: typeof toolRegistry;
+  twistAdapter: typeof twistAdapter;
+}
 
-export const container = {
-  db: dbAdapter,
-  vectorStore: dbAdapter,
-  aiProvider,
-  ingestionService,
-  retrievalService,
-  orchestratorService,
-  approvalService,
-  toolRegistry,
-  twistAdapter,
+declare global {
+  var __appContainerInstance: AppContainer | undefined;
+}
+
+const buildContainer = (): AppContainer => {
+  toolRegistry.setTwistPort(twistAdapter);
+  const ingestionService = new IngestionService(dbAdapter, dbAdapter, aiProvider);
+  const retrievalService = new HybridRetrievalService(dbAdapter, aiProvider, dbAdapter);
+  const approvalService = new ApprovalService(dbAdapter);
+  const orchestratorService = new MultiAgentOrchestrator(
+    dbAdapter,
+    aiProvider,
+    retrievalService,
+    toolRegistry,
+    approvalService,
+    twistAdapter
+  );
+
+  return {
+    db: dbAdapter,
+    vectorStore: dbAdapter,
+    aiProvider,
+    ingestionService,
+    retrievalService,
+    orchestratorService,
+    approvalService,
+    toolRegistry,
+    twistAdapter,
+  };
 };
+
+export const container: AppContainer =
+  globalThis.__appContainerInstance ?? buildContainer();
+
+if (process.env.NODE_ENV !== "production") {
+  globalThis.__appContainerInstance = container;
+}
+

@@ -5,19 +5,24 @@ export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    const chunkCount = await container.db.countTotalChunks();
+    const readiness = await container.db.checkReadiness();
     return NextResponse.json({
       status: "READY",
-      database: "CONNECTED",
-      pgvector: "READY",
-      totalChunksIndexed: chunkCount,
+      database: readiness.database,
+      pgvector: readiness.pgvector,
+      totalChunksIndexed: readiness.totalChunks,
+      dbLatencyMs: readiness.latencyMs,
+      details: readiness.details,
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
     return NextResponse.json(
       {
         status: "UNHEALTHY",
-        error: error.message,
+        database: "DISCONNECTED",
+        pgvector: "UNAVAILABLE",
+        error: error?.message || "Database or pgvector readiness check failed",
+        timestamp: new Date().toISOString(),
       },
       { status: 503 }
     );

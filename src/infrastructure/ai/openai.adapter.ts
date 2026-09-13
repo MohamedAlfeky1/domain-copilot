@@ -228,7 +228,85 @@ export class OpenAIProviderAdapter implements IAIProviderPort {
   }
 
   private generateMockCompletion(messages: CompletionMessage[], model: string): CompletionResult {
+    const sysMsg = messages.find((m) => m.role === "system")?.content || "";
     const userMsg = messages.find((m) => m.role === "user")?.content || "";
+
+    // 1. Evidence Extractor request -> ExtractorOutputSchema
+    if (
+      sysMsg.includes("Evidence Extractor") ||
+      sysMsg.includes("extractedFacts") ||
+      sysMsg.includes("Clinical Evidence Extractor")
+    ) {
+      const mockExtractor = {
+        extractedFacts: [
+          {
+            statement: "Verified clinical protocol evidence confirms baseline monitoring and standardized dosage boundaries are strictly enforced.",
+            chunkId: "chk-ext-001",
+            confidence: 0.95,
+          },
+          {
+            statement: "Titration curve rules prohibit dose escalation exceeding 150% without multidisciplinary review.",
+            chunkId: "chk-ext-002",
+            confidence: 0.92,
+          },
+        ],
+        relevantSections: [
+          "Section 1: Clinical Indication & Scope",
+          "Section 2: Dosage & Administration Rules",
+        ],
+        dataCompleteness: "HIGH",
+      };
+      return {
+        text: JSON.stringify(mockExtractor, null, 2),
+        promptTokens: 150,
+        completionTokens: 80,
+        totalTokens: 230,
+        model,
+      };
+    }
+
+    // 2. Safety Auditor request -> AuditorOutputSchema
+    if (
+      sysMsg.includes("Auditor") ||
+      sysMsg.includes("Safety Auditor") ||
+      sysMsg.includes("Contraindication") ||
+      sysMsg.includes("verifiedFacts")
+    ) {
+      const mockAuditor = {
+        verifiedFacts: [
+          "Dosage protocols cross-referenced with institutional clinical safety guidelines.",
+          "Hemodynamic and renal monitoring parameters align with therapeutic boundaries.",
+        ],
+        riskFlags: [],
+        domainComplianceApproved: true,
+        requiresHumanReview: false,
+        proposedAction: "synthesize_protocol_guidance",
+      };
+      return {
+        text: JSON.stringify(mockAuditor, null, 2),
+        promptTokens: 180,
+        completionTokens: 60,
+        totalTokens: 240,
+        model,
+      };
+    }
+
+    // 3. Drafter request -> DrafterOutputSchema
+    if (sysMsg.includes("Drafter") || sysMsg.includes("Protocol Drafter")) {
+      const mockDrafter = {
+        synthesis: `Based on the verified clinical protocol guidelines in the corpus:\n\n1. **Standard Indication & Scope**: Clinical management must cross-reference patient lab markers, arterial pressure, and organ clearance before initiating therapy.\n2. **Dosage & Administration**: Standard adult dosing requires strict adherence to evidence-based titration curves, with maximum dosage ceilings capped at protocol thresholds.\n3. **Safety & Monitoring**: Continuous monitoring and vital sign verification must be documented in electronic health records before adjusting regimens.`,
+        citationsUsed: ["chk-ext-001", "chk-ext-002"],
+      };
+      return {
+        text: JSON.stringify(mockDrafter, null, 2),
+        promptTokens: 200,
+        completionTokens: 120,
+        totalTokens: 320,
+        model,
+      };
+    }
+
+    // Default fallback
     const responseText = `[Deterministic Copilot Response (${model})]: Based on the verified corpus documents, here is the grounded synthesis for your inquiry: "${userMsg.slice(0, 50)}...". All claims are substantiated with verifiable citations.`;
     return {
       text: responseText,
@@ -244,25 +322,32 @@ export class OpenAIProviderAdapter implements IAIProviderPort {
     onToken: (token: string) => void,
     model: string
   ): Promise<CompletionResult> {
-    const userMsg = messages.find((m) => m.role === "user")?.content || "";
     const tokens = [
-      "Based ", "on ", "the ", "grounded ", "corpus ", "evidence, ",
-      "the ", "verified ", "findings ", "indicate ", "compliance ",
-      "with ", "domain ", "standards. ", "Specifically, ", "section ",
-      "protocols ", "require ", "explicit ", "documentation ", "before ",
-      "executing ", "any ", "downstream ", "actions."
+      "### Clinical Protocol Synthesis (gpt-4o)\n\n",
+      "Based on the **grounded clinical evidence** extracted from the active institutional corpus:\n\n",
+      "1. **Therapeutic Protocol & Titration**:\n",
+      "   - Standard adult dosing requires strict adherence to evidence-based titration curves.\n",
+      "   - Baseline loading doses are strictly defined in clinical guidelines with a 150% therapeutic ceiling.\n\n",
+      "2. **Hemodynamic & Lab Monitoring**:\n",
+      "   - Serial serum creatinine, potassium levels, and complete blood counts must be obtained at 0, 12, 24, and 48 hours.\n",
+      "   - Patients with pre-existing arrhythmia require continuous 12-lead ECG monitoring.\n\n",
+      "3. **Safety & Contraindications**:\n",
+      "   - Concurrent administration with strong CYP3A4 or MAO inhibitors is contraindicated.\n",
+      "   - Therapy must be systematically tapered over 72 hours once primary endpoints are achieved.\n\n",
+      "_All claims substantiated with exact corpus citations; zero stale evidence leakage._"
     ];
 
     for (const t of tokens) {
       onToken(t);
-      await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 20));
     }
 
+    const fullText = tokens.join("");
     return {
-      text: tokens.join(""),
-      promptTokens: 80,
+      text: fullText,
+      promptTokens: 150,
       completionTokens: tokens.length,
-      totalTokens: 80 + tokens.length,
+      totalTokens: 150 + tokens.length,
       model,
     };
   }

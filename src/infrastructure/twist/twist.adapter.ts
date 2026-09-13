@@ -5,29 +5,12 @@
  */
 
 import { ACTIVE_VARIANT } from "../../config/variant.config";
+import { ITwistPort, TwistExecutionInput, TwistEvaluationResult } from "../../core/application/ports/twist.port";
 
-export interface TwistExecutionInput {
-  actionName: string;
-  payload: Record<string, unknown>;
-  evidenceScores: number[];
-  requesterRole: string;
-}
+export type { TwistExecutionInput, TwistEvaluationResult };
+export type ITwistAdapter = ITwistPort;
 
-export interface TwistEvaluationResult {
-  isPermitted: boolean;
-  computedRiskIndex: number;
-  threshold: number;
-  enforcedPolicy: string;
-  violations: string[];
-}
-
-export interface ITwistAdapter {
-  readonly twistId: string;
-  readonly twistName: string;
-  evaluateRiskGuard(input: TwistExecutionInput): TwistEvaluationResult;
-}
-
-export class TwistRiskGuardAdapter implements ITwistAdapter {
+export class TwistRiskGuardAdapter implements ITwistPort {
   readonly twistId: string;
   readonly twistName: string;
 

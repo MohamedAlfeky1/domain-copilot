@@ -120,7 +120,7 @@ export interface Run {
   endedAt?: string;
 }
 
-export type StepType = "RETRIEVAL" | "AGENT_EXECUTION" | "TOOL_CALL" | "APPROVAL_GATE";
+export type StepType = "RETRIEVAL" | "AGENT_EXECUTION" | "TOOL_CALL" | "APPROVAL_GATE" | "GUARDRAIL";
 
 export interface RunStep {
   id: string;
