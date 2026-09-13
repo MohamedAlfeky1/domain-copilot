@@ -101,14 +101,14 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Epic Banner Header */}
+      {/* Header */}
       <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-sky-500/20 text-sky-400 font-semibold uppercase">
-              EPIC 01
+              KNOWLEDGE PIPELINE
             </span>
-            <span className="text-xs text-slate-400">8 Stories · P0 MVP Floor</span>
+            <span className="text-xs text-slate-400">Ingestion &amp; Vector Indexing</span>
           </div>
           <h2 className="text-xl font-bold text-white tracking-tight">
             Knowledge Ingestion & Vector Pipeline

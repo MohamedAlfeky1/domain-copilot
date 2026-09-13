@@ -81,9 +81,9 @@ export default function RunTracePage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-cyan-500/20 text-cyan-400 font-semibold uppercase">
-              EPIC 02 &amp; EPIC 07
+              HYBRID TELEMETRY
             </span>
-            <span className="text-xs text-slate-400">RET-005 · Trace &amp; Retrieval Inspector</span>
+            <span className="text-xs text-slate-400">Trace &amp; Retrieval Inspector</span>
           </div>
           <h2 className="text-xl font-bold text-white tracking-tight">Trace &amp; Retrieval Inspector</h2>
           <p className="text-xs text-slate-400 mt-1">
@@ -183,7 +183,7 @@ export default function RunTracePage() {
                 <div>
                   <h3 className="text-sm font-bold text-white font-mono flex items-center gap-2">
                     <Database className="w-4 h-4 text-emerald-400" />
-                    RETRIEVAL DEBUG INSPECTOR (RET-001 to RET-005)
+                    RETRIEVAL DEBUG INSPECTOR
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
                     Deterministic Reciprocal Rank Fusion (RRF) breakdown with dual-channel candidate scoring
@@ -210,7 +210,7 @@ export default function RunTracePage() {
               <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono">
                 <div className="flex items-center gap-2 text-slate-400 mb-1.5 font-bold">
                   <Filter className="w-3.5 h-3.5 text-sky-400" />
-                  <span>APPLIED METADATA FILTERS (RET-002 Scope):</span>
+                  <span>APPLIED METADATA FILTERS:</span>
                 </div>
                 <div className="flex flex-wrap gap-2 text-[11px]">
                   {retrievalTrace.appliedFilters && Object.keys(retrievalTrace.appliedFilters).length > 0 ? (
@@ -326,7 +326,7 @@ export default function RunTracePage() {
                 <div>
                   <h3 className="text-sm font-bold text-white font-mono flex items-center gap-2">
                     <ShieldAlert className="w-4 h-4 text-sky-400" />
-                    MANDATORY TWIST RISK GUARD TELEMETRY (TW-001 to TW-006)
+                    MANDATORY RISK GUARD TELEMETRY
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
                     Deterministic Side-Effect Risk Guard · Enforces assigned variant risk floor
@@ -380,7 +380,7 @@ export default function RunTracePage() {
           <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5">
             <h3 className="text-sm font-bold text-white font-mono mb-4 flex items-center gap-2">
               <DollarSign className="w-4 h-4 text-emerald-400" />
-              PER-CALL TOKEN USAGE &amp; COST ACCOUNTING (OBS-002)
+              PER-CALL TOKEN USAGE &amp; COST ACCOUNTING
             </h3>
 
             <div className="overflow-x-auto">

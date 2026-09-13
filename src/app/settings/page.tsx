@@ -92,7 +92,7 @@ export default function SettingsPage() {
       <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-4">
         <div className="flex items-center gap-2 text-sm font-bold text-white font-mono">
           <Cpu className="w-4 h-4 text-emerald-400" />
-          <span>AI &amp; LLM PROVIDER CONFIGURATION (DEV-002)</span>
+          <span>AI &amp; LLM PROVIDER CONFIGURATION</span>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -124,7 +124,7 @@ export default function SettingsPage() {
       <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-3">
         <div className="flex items-center gap-2 text-sm font-bold text-white font-mono">
           <Database className="w-4 h-4 text-purple-400" />
-          <span>SYSTEM READINESS &amp; HEALTH (OBS-006)</span>
+          <span>SYSTEM READINESS &amp; HEALTH</span>
         </div>
 
         <div className="grid grid-cols-2 gap-3 text-xs font-mono">

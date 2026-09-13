@@ -1,5 +1,5 @@
 /**
- * DOMAIN COPILOT - HYBRID RETRIEVAL SERVICE (EPIC 02: RET-001 to RET-006)
+ * DOMAIN COPILOT - HYBRID RETRIEVAL SERVICE
  * Implements Dense pgvector + PostgreSQL Keyword Search (FTS) + Reciprocal Rank Fusion (RRF)
  * Features: Metadata scope filtering (source, doc, version, section, page, language),
  * Incompatible scope rejection, structured citations, low-evidence refusal gate,

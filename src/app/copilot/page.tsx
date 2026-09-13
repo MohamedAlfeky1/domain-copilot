@@ -328,7 +328,7 @@ export default function CopilotPage() {
             <div className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs space-y-2">
               <div className="flex items-center gap-2 font-semibold text-rose-400">
                 <ShieldAlert className="w-4 h-4" />
-                <span>Low-Evidence Refusal Triggered (RET-004)</span>
+                <span>Low-Evidence Refusal Triggered</span>
               </div>
               <p className="leading-normal">{refusalMessage}</p>
             </div>
@@ -340,7 +340,7 @@ export default function CopilotPage() {
               <div className="flex items-center justify-between font-semibold text-rose-400">
                 <div className="flex items-center gap-2">
                   <ShieldAlert className="w-4 h-4" />
-                  <span>Mandatory Twist Guard Active: Risk Ceiling Exceeded (TW-002 / TW-005)</span>
+                  <span>Mandatory Safety Guard Active: Risk Ceiling Exceeded</span>
                 </div>
                 <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-300">
                   Risk Index: {twistEvaluation.computedRiskIndex} / Ceiling: {twistEvaluation.threshold}
@@ -364,7 +364,7 @@ export default function CopilotPage() {
             <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-3">
               <div className="flex items-center gap-2 font-semibold text-amber-400">
                 <AlertTriangle className="w-4 h-4" />
-                <span>Workflow Paused: Human Approval Required (HITL-002)</span>
+                <span>Workflow Paused: Human Approval Required</span>
               </div>
               <p className="leading-normal text-amber-200/80">{pendingApproval.proposedAction}</p>
 
