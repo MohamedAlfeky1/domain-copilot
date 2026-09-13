@@ -30,4 +30,13 @@ class RunControllerRegistry {
   }
 }
 
-export const runControllerRegistry = new RunControllerRegistry();
+declare global {
+  var __runControllerRegistryInstance: RunControllerRegistry | undefined;
+}
+
+export const runControllerRegistry: RunControllerRegistry =
+  globalThis.__runControllerRegistryInstance ?? new RunControllerRegistry();
+
+if (process.env.NODE_ENV !== "production") {
+  globalThis.__runControllerRegistryInstance = runControllerRegistry;
+}

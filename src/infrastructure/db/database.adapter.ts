@@ -11,7 +11,7 @@
  * 6. Resilient in-memory dual-layer synchronization for instant zero-dependency boot and offline test doubles.
  */
 
-import { IDatabasePort } from "../../core/application/ports/database.port";
+import { IDatabasePort, DatabaseReadinessResult } from "../../core/application/ports/database.port";
 import {
   IVectorStorePort,
   VectorSearchResult,
@@ -39,6 +39,9 @@ import {
 import { IncompatibleFilterScopeError } from "../../core/domain/errors";
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
 
 export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   // In-memory dual-layer storage
@@ -61,9 +64,15 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   private pg: PGlite | null = null;
   private isPgReady = false;
   private pgInitPromise: Promise<void> | null = null;
+  private stateFilePath = path.join(process.cwd(), "data", "db_state.json");
+  private persistTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     this.seedDefaultUsers();
+    const loaded = this.loadFromDisk();
+    if (!loaded) {
+      this.seedFromCorpusFixtures();
+    }
     this.pgInitPromise = this.initPostgres();
   }
 
@@ -130,9 +139,241 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
         );
       `);
       this.isPgReady = true;
+
+      // Sync memory documents, versions, chunks, embeddings into PGlite
+      for (const doc of this.documents.values()) {
+        try {
+          await this.pg.query(
+            `INSERT INTO documents (id, source, name, mime_type, size_bytes, content_hash, current_version_id, status, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, current_version_id = EXCLUDED.current_version_id;`,
+            [doc.id, doc.source, doc.name, doc.mimeType, doc.sizeBytes, doc.contentHash, doc.currentVersionId || null, doc.status, doc.createdAt]
+          );
+        } catch {}
+      }
+      for (const ver of this.versions.values()) {
+        try {
+          await this.pg.query(
+            `INSERT INTO document_versions (id, document_id, version, content_hash, language, pages, is_active, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (id) DO UPDATE SET is_active = EXCLUDED.is_active;`,
+            [ver.id, ver.documentId, ver.version, ver.contentHash, ver.language, ver.pages, ver.isActive, ver.createdAt]
+          );
+        } catch {}
+      }
+      for (const c of this.chunks.values()) {
+        try {
+          await this.pg.query(
+            `INSERT INTO chunks (id, document_version_id, chunk_index, section, page, clause, text, token_count, metadata, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (id) DO UPDATE SET text = EXCLUDED.text;`,
+            [c.id, c.documentVersionId, c.chunkIndex, c.section || null, c.page || null, c.clause || null, c.text, c.tokenCount, JSON.stringify(c.metadata), c.createdAt]
+          );
+        } catch {}
+      }
+      for (const emb of this.embeddings.values()) {
+        try {
+          const vecStr = `[${emb.vector.join(",")}]`;
+          await this.pg.query(
+            `INSERT INTO chunk_embeddings (id, chunk_id, model, dimension, vector, created_at)
+             VALUES ($1, $2, $3, $4, $5::vector, $6)
+             ON CONFLICT (id) DO UPDATE SET vector = EXCLUDED.vector;`,
+            [emb.id, emb.chunkId, emb.model, emb.dimension, vecStr, emb.createdAt]
+          );
+        } catch {}
+      }
     } catch (err) {
       console.warn("PGlite initialization notice (using memory fallback):", err);
       this.isPgReady = false;
+    }
+  }
+
+  public scheduleDiskPersist(): void {
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      this.saveToDisk();
+    }, 100);
+  }
+
+  public saveToDisk(): void {
+    try {
+      const dir = path.dirname(this.stateFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      const state = {
+        documents: Array.from(this.documents.entries()),
+        versions: Array.from(this.versions.entries()),
+        chunks: Array.from(this.chunks.entries()),
+        embeddings: Array.from(this.embeddings.entries()),
+        jobs: Array.from(this.jobs.entries()),
+        runs: Array.from(this.runs.entries()),
+        runSteps: Array.from(this.runSteps.entries()),
+        toolCalls: Array.from(this.toolCalls.entries()),
+        approvals: Array.from(this.approvals.entries()),
+        approvalEvents: this.approvalEvents,
+        usageLedger: this.usageLedger,
+      };
+
+      fs.writeFileSync(this.stateFilePath, JSON.stringify(state), "utf-8");
+    } catch (err) {
+      console.warn("Notice: Failed to persist database state to disk:", err);
+    }
+  }
+
+  public loadFromDisk(): boolean {
+    try {
+      if (!fs.existsSync(this.stateFilePath)) return false;
+      const raw = fs.readFileSync(this.stateFilePath, "utf-8");
+      if (!raw || raw.trim().length === 0) return false;
+      const state = JSON.parse(raw);
+
+      if (state.documents) this.documents = new Map(state.documents);
+      if (state.versions) this.versions = new Map(state.versions);
+      if (state.chunks) this.chunks = new Map(state.chunks);
+      if (state.embeddings) this.embeddings = new Map(state.embeddings);
+      if (state.jobs) this.jobs = new Map(state.jobs);
+      if (state.runs) this.runs = new Map(state.runs);
+      if (state.runSteps) this.runSteps = new Map(state.runSteps);
+      if (state.toolCalls) this.toolCalls = new Map(state.toolCalls);
+      if (state.approvals) this.approvals = new Map(state.approvals);
+      if (state.approvalEvents) this.approvalEvents = state.approvalEvents;
+      if (state.usageLedger) this.usageLedger = state.usageLedger;
+
+      return this.documents.size > 0;
+    } catch (err) {
+      console.warn("Notice: Failed to load database state from disk:", err);
+      return false;
+    }
+  }
+
+  private generateDeterministicVector(text: string, dimension = 1536): number[] {
+    const vector = new Array(dimension).fill(0);
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      hash = (hash << 5) - hash + text.charCodeAt(i);
+      hash |= 0;
+    }
+    for (let i = 0; i < dimension; i++) {
+      const val = Math.sin(hash + i);
+      vector[i] = Math.round(val * 10000) / 10000;
+    }
+    return vector;
+  }
+
+  public seedFromCorpusFixtures(): void {
+    const fixturesDir = path.join(process.cwd(), "fixtures", "corpus");
+    if (!fs.existsSync(fixturesDir)) return;
+
+    try {
+      const files = fs.readdirSync(fixturesDir).filter((f) => f.endsWith(".txt"));
+      for (const file of files) {
+        const fullPath = path.join(fixturesDir, file);
+        const content = fs.readFileSync(fullPath, "utf-8");
+        const hash = crypto.createHash("sha256").update(content).digest("hex");
+
+        const docId = `doc-${crypto.createHash("sha256").update(file).digest("hex").slice(0, 16)}`;
+        if (this.documents.has(docId)) continue;
+
+        const title = file
+          .replace(/\.txt$/, "")
+          .replace(/^clinical_protocol__/, "Clinical Protocol: ")
+          .replace(/___/g, " & ")
+          .replace(/__/g, " - ")
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+        const versionId = `ver-${docId}-1`;
+        const doc: Document = {
+          id: docId,
+          source: file,
+          name: title,
+          mimeType: "text/plain",
+          sizeBytes: Buffer.byteLength(content, "utf-8"),
+          contentHash: hash,
+          currentVersionId: versionId,
+          status: "INDEXED",
+          createdAt: new Date().toISOString(),
+        };
+
+        const version: DocumentVersion = {
+          id: versionId,
+          documentId: docId,
+          version: 1,
+          contentHash: hash,
+          language: "english",
+          pages: Math.max(1, Math.ceil(content.length / 2500)),
+          isActive: true,
+          createdAt: new Date().toISOString(),
+        };
+
+        this.documents.set(doc.id, doc);
+        this.versions.set(version.id, version);
+
+        const sections = content.split(/(?=###? Section|###? Supplementary)/g);
+        let chunkIndex = 0;
+        let charOffset = 0;
+
+        for (const sec of sections) {
+          const trimmed = sec.trim();
+          if (!trimmed) continue;
+
+          const subChunks = [];
+          if (trimmed.length > 1200) {
+            for (let i = 0; i < trimmed.length; i += 1000) {
+              subChunks.push(trimmed.slice(i, i + 1000));
+            }
+          } else {
+            subChunks.push(trimmed);
+          }
+
+          for (const sub of subChunks) {
+            const lines = sub.split("\n");
+            const headerMatch = lines[0].match(/###?\s*(.*)/);
+            const sectionName = headerMatch ? headerMatch[1].trim() : "General Guidance";
+            const pageNum = Math.floor(charOffset / 2500) + 1;
+            charOffset += sub.length;
+
+            const chunkId = `chk-${docId.slice(4, 12)}-${chunkIndex}`;
+            const chunk: Chunk = {
+              id: chunkId,
+              documentVersionId: versionId,
+              chunkIndex,
+              section: sectionName,
+              page: pageNum,
+              clause: `Clause ${chunkIndex + 1}`,
+              text: sub,
+              tokenCount: Math.ceil(sub.length / 4),
+              metadata: {
+                documentName: title,
+                version: 1,
+                source: file,
+              },
+              createdAt: new Date().toISOString(),
+            };
+
+            this.chunks.set(chunk.id, chunk);
+
+            const vec = this.generateDeterministicVector(sub, 1536);
+            const embedding: ChunkEmbedding = {
+              id: `emb-${chunk.id}`,
+              chunkId: chunk.id,
+              model: "text-embedding-3-small",
+              dimension: 1536,
+              vector: vec,
+              createdAt: new Date().toISOString(),
+            };
+            this.embeddings.set(chunk.id, embedding);
+            chunkIndex++;
+          }
+        }
+      }
+
+      this.saveToDisk();
+    } catch (e) {
+      console.warn("Corpus auto-seeding notice:", e);
     }
   }
 
@@ -245,6 +486,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   // --- Documents & Versions ---
   async saveDocument(doc: Document): Promise<Document> {
     this.documents.set(doc.id, doc);
+    this.scheduleDiskPersist();
     if (await this.ensurePgReady()) {
       try {
         await this.pg!.query(
@@ -289,6 +531,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
 
   async saveDocumentVersion(version: DocumentVersion): Promise<DocumentVersion> {
     this.versions.set(version.id, version);
+    this.scheduleDiskPersist();
     if (await this.ensurePgReady()) {
       try {
         await this.pg!.query(
@@ -318,6 +561,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
         this.versions.set(version.id, version);
       }
     }
+    this.scheduleDiskPersist();
     if (await this.ensurePgReady()) {
       try {
         await this.pg!.query(
@@ -348,6 +592,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
         }
       }
     }
+    this.scheduleDiskPersist();
   }
 
   async getChunksByVersion(versionId: string): Promise<Chunk[]> {
@@ -363,12 +608,23 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   }
 
   async countTotalChunks(): Promise<number> {
+    if (await this.ensurePgReady()) {
+      try {
+        const res = await this.pg!.query<{ count: string }>("SELECT COUNT(*) as count FROM chunks;");
+        if (res.rows[0]?.count) {
+          return parseInt(res.rows[0].count, 10);
+        }
+      } catch {
+        // Fall back to memory map
+      }
+    }
     return this.chunks.size;
   }
 
   // --- Vector Store Operations ---
   async saveEmbedding(embedding: ChunkEmbedding): Promise<void> {
     this.embeddings.set(embedding.chunkId, embedding);
+    this.scheduleDiskPersist();
     if (await this.ensurePgReady()) {
       try {
         const vecStr = `[${embedding.vector.join(",")}]`;
@@ -739,6 +995,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   // --- Ingestion Jobs ---
   async saveIngestionJob(job: IngestionJob): Promise<IngestionJob> {
     this.jobs.set(job.id, job);
+    this.scheduleDiskPersist();
     return job;
   }
 
@@ -750,6 +1007,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
     const existing = this.jobs.get(job.id);
     if (existing) {
       this.jobs.set(job.id, { ...existing, ...job });
+      this.scheduleDiskPersist();
     }
   }
 
@@ -762,6 +1020,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   // --- Runs & Traces ---
   async saveRun(run: Run): Promise<Run> {
     this.runs.set(run.id, run);
+    this.scheduleDiskPersist();
     return run;
   }
 
@@ -790,6 +1049,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
       if (["COMPLETED", "REFUSED", "FAILED", "CANCELLED"].includes(status)) {
         run.endedAt = new Date().toISOString();
       }
+      this.scheduleDiskPersist();
     }
   }
 
@@ -923,7 +1183,76 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   async listEvaluationResults(): Promise<EvaluationResult[]> {
     return this.evalResults;
   }
+
+  // --- Readiness & Health Check (OBS-006) ---
+  private testDbFailureSimulated = false;
+
+  public setTestDbFailure(simulate: boolean): void {
+    this.testDbFailureSimulated = simulate;
+  }
+
+  async checkReadiness(): Promise<DatabaseReadinessResult> {
+    const start = Date.now();
+
+    if (this.testDbFailureSimulated) {
+      throw new Error("PostgreSQL database connection is offline (simulated test failure)");
+    }
+
+    const isReady = await this.ensurePgReady();
+    if (!isReady || !this.pg) {
+      throw new Error("PostgreSQL database connection is not ready or failed initialization");
+    }
+
+    // 1. Verify SQL execution with ping query
+    const pingRes = await this.pg.query<{ ping: number }>("SELECT 1 AS ping;");
+    if (!pingRes || !pingRes.rows || pingRes.rows.length === 0 || pingRes.rows[0].ping !== 1) {
+      throw new Error("Database ping query failed: unexpected response");
+    }
+
+    // 2. Verify pgvector extension execution
+    const vecRes = await this.pg.query<{ test_vec: string }>("SELECT '[1.0, 2.0, 3.0]'::vector AS test_vec;");
+    if (!vecRes || !vecRes.rows || vecRes.rows.length === 0) {
+      throw new Error("pgvector extension query failed: vector type not recognized");
+    }
+
+    // 3. Count total chunks directly from DB table
+    let chunkCount = this.chunks.size;
+    try {
+      const countRes = await this.pg.query<{ count: string }>("SELECT COUNT(*) as count FROM chunks;");
+      if (countRes.rows[0]?.count) {
+        chunkCount = parseInt(countRes.rows[0].count, 10);
+      }
+    } catch {
+      chunkCount = this.chunks.size;
+    }
+
+    const latencyMs = Date.now() - start;
+
+    return {
+      isReady: true,
+      database: "CONNECTED",
+      pgvector: "READY",
+      totalChunks: Math.max(chunkCount, this.chunks.size),
+      latencyMs,
+      details: {
+        engine: "PGlite",
+        pgvector: "vector-extension-enabled",
+        pingOk: true,
+        checkedAt: new Date().toISOString(),
+      },
+    };
+  }
 }
 
-// Global Singleton for dependency injection
-export const dbAdapter = new DatabaseAdapter();
+// Global Singleton for dependency injection across Next.js API route bundles
+declare global {
+  var __dbAdapterInstance: DatabaseAdapter | undefined;
+}
+
+export const dbAdapter: DatabaseAdapter =
+  globalThis.__dbAdapterInstance ?? new DatabaseAdapter();
+
+if (process.env.NODE_ENV !== "production") {
+  globalThis.__dbAdapterInstance = dbAdapter;
+}
+

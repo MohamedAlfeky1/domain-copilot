@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { container } from "@/core/application/container";
+import { requireRole } from "@/infrastructure/auth/auth-guard";
 
 export const runtime = "nodejs";
 
@@ -8,6 +9,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
+    const user = await requireRole(req, ["ADMIN", "APPROVER"]);
     const body = await req.json();
     const { modifiedPayload, comment, reviewerId } = body;
 

@@ -6,12 +6,15 @@
 
 import { createHash } from "crypto";
 import { SideEffectBlockedError, ValidationError } from "../../domain/errors";
+import { ToolDefinition } from "../ports/ai-provider.port";
+import { ITwistPort } from "../ports/twist.port";
 
 export interface ToolContext {
   agentName: string;
   runId: string;
   approvalToken?: string;
   isPreApproved?: boolean;
+  evidenceScores?: number[];
 }
 
 export interface RegisteredTool {
@@ -25,9 +28,15 @@ export interface RegisteredTool {
 
 export class ToolRegistry {
   private tools: Map<string, RegisteredTool> = new Map();
+  private twistPort?: ITwistPort;
 
-  constructor() {
+  constructor(twistPort?: ITwistPort) {
+    this.twistPort = twistPort;
     this.registerBuiltinTools();
+  }
+
+  setTwistPort(twistPort: ITwistPort) {
+    this.twistPort = twistPort;
   }
 
   private registerBuiltinTools() {
@@ -162,9 +171,53 @@ export class ToolRegistry {
       );
     }
 
+    // Enforce Twist Risk Guard on consequential / side-effecting actions (TW-002, TW-004)
+    if (tool.isSideEffecting && this.twistPort) {
+      const twistEvaluation = this.twistPort.evaluateRiskGuard({
+        actionName: name,
+        payload: args,
+        evidenceScores: context.evidenceScores || [],
+        requesterRole: context.agentName,
+      });
+
+      if (!twistEvaluation.isPermitted) {
+        throw new SideEffectBlockedError(
+          `Consequential action "${name}" blocked by Mandatory Twist Guard (${this.twistPort.twistName}): ` +
+          `${twistEvaluation.violations.join(" ")} ` +
+          `[Risk Index: ${twistEvaluation.computedRiskIndex} >= Threshold: ${twistEvaluation.threshold}]`
+        );
+      }
+    }
+
     const argsHash = createHash("sha256").update(JSON.stringify(args)).digest("hex");
     const outcome = await tool.execute(args, context);
     return { outcome, argsHash };
+  }
+
+  /**
+   * Returns ToolDefinition[] for tools available to a specific agent,
+   * formatted for passing to the AI provider's function-calling API.
+   */
+  getToolsForAgent(agentName: string): ToolDefinition[] {
+    const defs: ToolDefinition[] = [];
+    for (const tool of this.tools.values()) {
+      const isAllowed = tool.allowedAgents.some((agent) => agentName.includes(agent));
+      if (isAllowed) {
+        defs.push({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parametersSchema,
+        });
+      }
+    }
+    return defs;
+  }
+
+  /**
+   * Returns tool names available to a specific agent.
+   */
+  getToolNamesForAgent(agentName: string): string[] {
+    return this.getToolsForAgent(agentName).map((t) => t.name);
   }
 }
 
