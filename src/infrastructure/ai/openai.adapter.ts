@@ -228,14 +228,66 @@ export class OpenAIProviderAdapter implements IAIProviderPort {
   }
 
   private generateMockCompletion(messages: CompletionMessage[], model: string): CompletionResult {
-    const sysMsg = messages.find((m) => m.role === "system")?.content || "";
+    const sysMsgObj = messages.find((m) => m.role === "system");
+    const sysMsg = sysMsgObj?.content || "";
+    const msgName = sysMsgObj?.name || "";
     const userMsg = messages.find((m) => m.role === "user")?.content || "";
 
-    // 1. Evidence Extractor request -> ExtractorOutputSchema
+    // 1. Safety Auditor request -> AuditorOutputSchema
+    // Check Auditor FIRST to prevent collisions with extracted findings passed in prompt
     if (
+      msgName.includes("Auditor") ||
+      sysMsg.includes("Risk and Compliance Auditor") ||
+      sysMsg.includes("Contraindication & Safety Auditor") ||
+      sysMsg.includes("Auditor specialist") ||
+      sysMsg.includes('"verifiedFacts":')
+    ) {
+      const mockAuditor = {
+        verifiedFacts: [
+          "Dosage protocols cross-referenced with institutional clinical safety guidelines.",
+          "Hemodynamic and renal monitoring parameters align with therapeutic boundaries.",
+        ],
+        riskFlags: [],
+        domainComplianceApproved: true,
+        requiresHumanReview: false,
+        proposedAction: "synthesize_protocol_guidance",
+      };
+      return {
+        text: JSON.stringify(mockAuditor, null, 2),
+        promptTokens: 180,
+        completionTokens: 60,
+        totalTokens: 240,
+        model,
+      };
+    }
+
+    // 2. Response Drafter request -> DrafterOutputSchema
+    if (
+      msgName.includes("Drafter") ||
+      sysMsg.includes("Response Drafter") ||
+      sysMsg.includes("Protocol Drafter") ||
+      sysMsg.includes("Drafter specialist") ||
+      sysMsg.includes('"synthesis":')
+    ) {
+      const mockDrafter = {
+        synthesis: `Based on the verified clinical protocol guidelines in the corpus:\n\n1. **Standard Indication & Scope**: Clinical management must cross-reference patient lab markers, arterial pressure, and organ clearance before initiating therapy.\n2. **Dosage & Administration**: Standard adult dosing requires strict adherence to evidence-based titration curves, with maximum dosage ceilings capped at protocol thresholds.\n3. **Safety & Monitoring**: Continuous monitoring and vital sign verification must be documented in electronic health records before adjusting regimens.`,
+        citationsUsed: ["chk-ext-001", "chk-ext-002"],
+      };
+      return {
+        text: JSON.stringify(mockDrafter, null, 2),
+        promptTokens: 200,
+        completionTokens: 120,
+        totalTokens: 320,
+        model,
+      };
+    }
+
+    // 3. Evidence Extractor request -> ExtractorOutputSchema
+    if (
+      msgName.includes("Extractor") ||
       sysMsg.includes("Evidence Extractor") ||
-      sysMsg.includes("extractedFacts") ||
-      sysMsg.includes("Clinical Evidence Extractor")
+      sysMsg.includes("Clinical Evidence Extractor") ||
+      sysMsg.includes('"extractedFacts":')
     ) {
       const mockExtractor = {
         extractedFacts: [
@@ -261,47 +313,6 @@ export class OpenAIProviderAdapter implements IAIProviderPort {
         promptTokens: 150,
         completionTokens: 80,
         totalTokens: 230,
-        model,
-      };
-    }
-
-    // 2. Safety Auditor request -> AuditorOutputSchema
-    if (
-      sysMsg.includes("Auditor") ||
-      sysMsg.includes("Safety Auditor") ||
-      sysMsg.includes("Contraindication") ||
-      sysMsg.includes("verifiedFacts")
-    ) {
-      const mockAuditor = {
-        verifiedFacts: [
-          "Dosage protocols cross-referenced with institutional clinical safety guidelines.",
-          "Hemodynamic and renal monitoring parameters align with therapeutic boundaries.",
-        ],
-        riskFlags: [],
-        domainComplianceApproved: true,
-        requiresHumanReview: false,
-        proposedAction: "synthesize_protocol_guidance",
-      };
-      return {
-        text: JSON.stringify(mockAuditor, null, 2),
-        promptTokens: 180,
-        completionTokens: 60,
-        totalTokens: 240,
-        model,
-      };
-    }
-
-    // 3. Drafter request -> DrafterOutputSchema
-    if (sysMsg.includes("Drafter") || sysMsg.includes("Protocol Drafter")) {
-      const mockDrafter = {
-        synthesis: `Based on the verified clinical protocol guidelines in the corpus:\n\n1. **Standard Indication & Scope**: Clinical management must cross-reference patient lab markers, arterial pressure, and organ clearance before initiating therapy.\n2. **Dosage & Administration**: Standard adult dosing requires strict adherence to evidence-based titration curves, with maximum dosage ceilings capped at protocol thresholds.\n3. **Safety & Monitoring**: Continuous monitoring and vital sign verification must be documented in electronic health records before adjusting regimens.`,
-        citationsUsed: ["chk-ext-001", "chk-ext-002"],
-      };
-      return {
-        text: JSON.stringify(mockDrafter, null, 2),
-        promptTokens: 200,
-        completionTokens: 120,
-        totalTokens: 320,
         model,
       };
     }

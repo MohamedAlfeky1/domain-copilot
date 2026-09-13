@@ -134,7 +134,7 @@ export class MultiAgentOrchestrator {
   ): Promise<string> {
     const toolDefs = this.tools.getToolsForAgent(agentName);
     const messages: CompletionMessage[] = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: systemPrompt, name: agentName.replace(/[^a-zA-Z0-9_-]/g, "_") },
     ];
 
     for (let iteration = 0; iteration < this.MAX_ITERATIONS; iteration++) {
