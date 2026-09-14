@@ -4,6 +4,8 @@ const nextConfig = {
   reactStrictMode: true,
   experimental: {
     serverComponentsExternalPackages: ["@electric-sql/pglite", "pg"],
+    cpus: 1,
+    workerThreads: false,
   },
   webpack: (config, { isServer }) => {
     if (!isServer) {
