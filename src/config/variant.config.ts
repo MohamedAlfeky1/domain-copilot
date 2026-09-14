@@ -6,7 +6,17 @@
  * - Domain = (last two National ID digits) mod 7
  * - Twist = (sum of all digits) mod 8
  * - Building the wrong assigned variant invalidates the submission.
+ *
+ * National ID: 30205051400777
+ * Domain: 77 mod 7 = 0 → D0 (Healthcare)
+ * Twist: 3+0+2+0+5+0+5+1+4+0+0+7+7+7 = 41, 41 mod 8 = 1 → T1 (Bilingual AR+EN)
  */
+
+export interface BilingualConfig {
+  supportedLanguages: string[];
+  defaultUILocale: string;
+  arabicUnicodeRange: RegExp;
+}
 
 export interface VariantDefinition {
   domainId: string;
@@ -15,10 +25,11 @@ export interface VariantDefinition {
   twistName: string;
   domainRiskPolicy: string;
   riskThreshold: number;
+  bilingualConfig?: BilingualConfig;
 }
 
 export const SUPPORTED_DOMAINS: Record<string, { name: string; specialists: [string, string, string]; riskPolicy: string }> = {
-  D1_HEALTHCARE: {
+  D0_HEALTHCARE: {
     name: "Clinical Protocol & Drug Safety",
     specialists: ["Clinical Evidence Extractor", "Contraindication & Safety Auditor", "Therapeutic Protocol Drafter"],
     riskPolicy: "Zero-tolerance for unverified drug interactions or off-label dosage claims.",
@@ -36,9 +47,9 @@ export const SUPPORTED_DOMAINS: Record<string, { name: string; specialists: [str
 };
 
 export const SUPPORTED_TWISTS: Record<string, { name: string; description: string }> = {
-  T1_SAFETY_GUARDRAIL: {
-    name: "Deterministic Side-Effect Risk Guard",
-    description: "Blocks downstream execution if calculated evidence uncertainty exceeds domain risk ceiling.",
+  T1_BILINGUAL_AR_EN: {
+    name: "Bilingual Arabic + English",
+    description: "Supports Arabic document ingestion/retrieval, cross-lingual queries (EN↔AR), RTL rendering, and separate Arabic retrieval evaluation.",
   },
   T2_CONFIDENCE_CALIBRATION: {
     name: "Calibrated Evidence-Weighted Uncertainty Index",
@@ -47,8 +58,8 @@ export const SUPPORTED_TWISTS: Record<string, { name: string; description: strin
 };
 
 export function getLockedVariant(): VariantDefinition {
-  const rawDomain = process.env.ASSIGNED_DOMAIN || "D1_HEALTHCARE";
-  const rawTwist = process.env.ASSIGNED_TWIST || "T1_SAFETY_GUARDRAIL";
+  const rawDomain = process.env.ASSIGNED_DOMAIN || "D0_HEALTHCARE";
+  const rawTwist = process.env.ASSIGNED_TWIST || "T1_BILINGUAL_AR_EN";
 
   // Fail-fast gate: prevent raw placeholders in production or release
   if (rawDomain === "D<n>" || rawTwist === "T<n>") {
@@ -58,8 +69,8 @@ export function getLockedVariant(): VariantDefinition {
     );
   }
 
-  const domainConfig = SUPPORTED_DOMAINS[rawDomain] || SUPPORTED_DOMAINS["D1_HEALTHCARE"];
-  const twistConfig = SUPPORTED_TWISTS[rawTwist] || SUPPORTED_TWISTS["T1_SAFETY_GUARDRAIL"];
+  const domainConfig = SUPPORTED_DOMAINS[rawDomain] || SUPPORTED_DOMAINS["D0_HEALTHCARE"];
+  const twistConfig = SUPPORTED_TWISTS[rawTwist] || SUPPORTED_TWISTS["T1_BILINGUAL_AR_EN"];
 
   return {
     domainId: rawDomain,
@@ -68,6 +79,11 @@ export function getLockedVariant(): VariantDefinition {
     twistName: twistConfig.name,
     domainRiskPolicy: domainConfig.riskPolicy,
     riskThreshold: 0.85,
+    bilingualConfig: rawTwist === "T1_BILINGUAL_AR_EN" ? {
+      supportedLanguages: ["en", "ar"],
+      defaultUILocale: "en",
+      arabicUnicodeRange: /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/,
+    } : undefined,
   };
 }
 

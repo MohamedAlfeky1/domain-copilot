@@ -11,7 +11,7 @@ footer: "Postgraduate Engineering Lab · 90-Minute Interactive Masterclass"
 **Course:** Advanced Agentic Systems & Clean Architecture  
 **Instructor:** Antigravity AI Engineering  
 **Duration:** 90 Minutes (Lecture + Hands-on Lab)  
-**Assigned Domain:** D1: Clinical Protocol & Drug Safety | **Twist:** T1: Deterministic Risk Guard  
+**Assigned Domain:** D0: Healthcare | **Twist:** T1: Bilingual Arabic + English (AR+EN)  
 
 ---
 
@@ -19,7 +19,7 @@ footer: "Postgraduate Engineering Lab · 90-Minute Interactive Masterclass"
 1. **Part 1 (15m):** Why Naive RAG Fails in Regulated Environments & Clean Architecture
 2. **Part 2 (20m):** Hybrid Search Engineering (Dense Cosine vs PostgreSQL FTS + RRF)
 3. **Part 3 (20m):** Multi-Agent Orchestration & Deterministic Supervisor State Machines
-4. **Part 4 (15m):** Human-in-the-Loop (HITL) Governance & Mandatory Twist Risk Guard
+4. **Part 4 (15m):** Human-in-the-Loop (HITL) Governance & Mandatory Twist T1 (Bilingual AR+EN)
 5. **Part 5 (10m):** Prompt Injection Hardening & Real-Time SSE Streaming
 6. **Part 6 (10m):** Hands-On Lab Walkthrough, Expected Outputs & Stretch Challenges
 
@@ -182,16 +182,17 @@ footer: "Postgraduate Engineering Lab · 90-Minute Interactive Masterclass"
 
 ---
 
-## Slide 15: Mandatory Twist (T1): Deterministic Risk Guard
-- **Assigned Twist:** Deterministic Side-Effect Risk Guard behind `ITwistPort`.
-- **Ceiling Enforcement (0.85):**
-  - Base risk: 0.10.
-  - Consequential operation (`update`, `execute`, `delete`): $+0.30$.
-  - Low evidence confidence ($< 0.35$): $+0.45$.
-  - Zero evidence available: $+0.60$.
-- **Result:**
-  $$\text{Computed Risk Index} = 0.10 + 0.30 + 0.45 = 0.85 \ge 0.85 \implies \mathbf{BLOCKED!}$$
-- Halts execution and forces human reviewer escalation before committing mutations.
+## Slide 15: Mandatory Twist (T1): Bilingual Arabic + English (AR+EN)
+- **Assigned Twist:** T1 Bilingual Arabic + English behind clean `ITwistPort`.
+- **Dynamic Language Detection:**
+  - Fast Unicode block analysis (`\u0600-\u06FF`) detects Arabic, English, and code-switched clinical inputs.
+- **Cross-Lingual Hybrid Retrieval:**
+  - English clinical queries retrieve Arabic evidence chunks and vice-versa via shared `text-embedding-3-small` vector space.
+  - PostgreSQL FTS dynamically selects `simple` dictionary for Arabic and `english` for English tokens.
+- **Bi-directional RTL UI Rendering:**
+  - Automatic `dir="auto"` and RTL CSS direction rules render Arabic evidence chunks, citations, and answers cleanly.
+- **Preserved Safety Invariant:**
+  - Internal Deterministic Risk Guard remains active, preventing unverified dosage or off-label actions ($< 0.35$ floor).
 
 ---
 

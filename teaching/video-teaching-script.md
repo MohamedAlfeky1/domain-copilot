@@ -104,26 +104,21 @@
 ### Segment 4: The Mandatory Twist: Enforcing Hard Risk Ceilings (6:30 – 8:30)
 **Visual Setup:**
 - VS Code showing `src/infrastructure/twist/twist.adapter.ts`.
-- Highlight `evaluateRiskGuard()` method and `threshold = 0.85`.
+- Highlight `detectLanguage()`, `getCrossLingualConfig()`, `getFTSConfig()`, and `evaluateRiskGuard()`.
 
 **Instructor Narration:**
-> "Now let's discuss our assigned twist: **T1: Deterministic Side-Effect Risk Guard**.
+> "Now let's discuss our assigned mandatory twist: **T1: Bilingual Arabic + English (AR+EN)**.
 > 
-> In enterprise architecture, guardrails must never be left purely to LLM prompt persuasion. If you ask an LLM 'Are you sure this dosage change is safe?', a sophisticated prompt injection or hallucination can persuade it to answer 'Yes'.
+> In enterprise RAG architectures, handling multilingual corpora often falls into two anti-patterns: either calling an external translation API on every incoming query — which adds 800 milliseconds of latency, increases costs, and mangles clinical terminology — or maintaining separate, isolated monolingual databases.
 > 
-> Our Twist Guard is implemented as **pure, deterministic TypeScript code** behind the `ITwistPort` interface.
+> Instead, our solution implements a clean port-and-adapter architecture behind `ITwistPort`:
 > 
-> Notice how the risk index is computed:
-> - We start with a baseline risk of 0.10.
-> - If the tool is a consequential state-modifying action (like `execute_protocol_update`), we add $+0.30$.
-> - If the lowest evidence confidence score in our retrieval set is below 0.35, we add $+0.45$.
+> 1. **Dynamic Language Detection**: We use Unicode block analysis (`\u0600-\u06FF`) to detect Arabic, English, or code-switched inputs in microseconds with zero external dependencies.
+> 2. **Cross-Lingual Dense Space**: Because `text-embedding-3-small` is natively multilingual, Arabic and English clinical concepts project into the exact same vector space. An English clinical query can retrieve Arabic clinical guidelines directly.
+> 3. **FTS Dictionary Routing**: For lexical search, our adapter routes Arabic tokens to PostgreSQL's `simple` dictionary and English tokens to the `english` stemmer.
+> 4. **Bi-Directional UI Rendering**: Any Arabic content automatically receives `dir='auto'` and RTL CSS layout rules.
 > 
-> When uncertainty is elevated on a consequential tool:
-> $$0.10 + 0.30 + 0.45 = 0.85$$
-> 
-> Because 0.85 meets our ceiling threshold, the action is **deterministically blocked**.
-> 
-> The orchestrator catches this, pauses the workflow state in memory, and creates an approval record in our PostgreSQL database. The action cannot proceed until an authorized human reviewer logs into `/reviews` and grants a cryptographically signed approval token."
+> Furthermore, we preserve our deterministic Side-Effect Risk Guard as an internal safety invariant: if an action attempts high-consequence mutations with unverified evidence (< 0.35 confidence), it halts execution and routes to the Human-in-the-Loop approval gate."
 
 ---
 

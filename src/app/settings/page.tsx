@@ -14,8 +14,8 @@ import {
 } from "lucide-react";
 
 export default function SettingsPage() {
-  const [domainId, setDomainId] = useState("D1_HEALTHCARE");
-  const [twistId, setTwistId] = useState("T1_SAFETY_GUARDRAIL");
+  const [domainId, setDomainId] = useState("D0_HEALTHCARE");
+  const [twistId, setTwistId] = useState("T1_BILINGUAL_AR_EN");
   const [model, setModel] = useState("gpt-4o");
   const [embeddingModel, setEmbeddingModel] = useState("text-embedding-3-small");
   const [saved, setSaved] = useState(false);
@@ -68,7 +68,7 @@ export default function SettingsPage() {
               onChange={(e) => setDomainId(e.target.value)}
               className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-sky-500 font-mono"
             >
-              <option value="D1_HEALTHCARE">D1: Clinical Protocol &amp; Drug Safety</option>
+              <option value="D0_HEALTHCARE">D0: Clinical Protocol &amp; Drug Safety</option>
               <option value="D2_FINANCIAL">D2: Corporate Audit &amp; Credit Risk</option>
               <option value="D3_LEGAL">D3: Statutory &amp; Contract Governance</option>
             </select>
@@ -81,7 +81,7 @@ export default function SettingsPage() {
               onChange={(e) => setTwistId(e.target.value)}
               className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-sky-500 font-mono"
             >
-              <option value="T1_SAFETY_GUARDRAIL">T1: Deterministic Side-Effect Risk Guard</option>
+              <option value="T1_BILINGUAL_AR_EN">T1: Bilingual Arabic + English</option>
               <option value="T2_CONFIDENCE_CALIBRATION">T2: Calibrated Uncertainty Index</option>
             </select>
           </div>

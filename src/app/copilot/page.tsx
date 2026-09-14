@@ -70,10 +70,10 @@ export default function CopilotPage() {
 
   // Workflow progress steps
   const [steps, setSteps] = useState<StepProgress[]>([
-    { agent: "Retrieval Engine (Dense + Keyword RRF)", status: "pending" },
+    { agent: "Retrieval Engine (Cross-Lingual AR+EN)", status: "pending" },
     { agent: "Clinical Evidence Extractor", status: "pending" },
     { agent: "Contraindication & Safety Auditor", status: "pending" },
-    { agent: "Mandatory Twist Guard", status: "pending" },
+    { agent: "Bilingual Context & Policy Guard", status: "pending" },
     { agent: "Therapeutic Protocol Drafter (gpt-4o)", status: "pending" },
   ]);
 
@@ -95,10 +95,10 @@ export default function CopilotPage() {
 
     // Reset steps
     setSteps([
-      { agent: "Retrieval Engine (Dense + Keyword RRF)", status: "running" },
+      { agent: "Retrieval Engine (Cross-Lingual AR+EN)", status: "running" },
       { agent: "Clinical Evidence Extractor", status: "pending" },
       { agent: "Contraindication & Safety Auditor", status: "pending" },
-      { agent: "Mandatory Twist Guard", status: "pending" },
+      { agent: "Bilingual Context & Policy Guard", status: "pending" },
       { agent: "Therapeutic Protocol Drafter (gpt-4o)", status: "pending" },
     ]);
 
@@ -405,7 +405,7 @@ export default function CopilotPage() {
           )}
 
           {streamedText && (
-            <div className="prose prose-invert max-w-none text-slate-200 whitespace-pre-wrap">
+            <div className="prose prose-invert max-w-none text-slate-200 whitespace-pre-wrap" dir="auto">
               {streamedText}
             </div>
           )}
@@ -476,8 +476,9 @@ export default function CopilotPage() {
                   handleSubmit();
                 }
               }}
+              dir="auto"
               rows={2}
-              placeholder="Ask a question grounded in the clinical protocol corpus (Enter to run, Shift+Enter for newline)..."
+              placeholder="Ask a question grounded in the clinical protocol corpus (English or Arabic)..."
               className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 resize-none font-sans"
             />
             {streaming ? (
@@ -536,7 +537,7 @@ export default function CopilotPage() {
 
             <div className="space-y-1">
               <p className="text-[11px] font-mono text-slate-400">Verbatim Stored Chunk:</p>
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-[11px] text-slate-300 leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap">
+              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-[11px] text-slate-300 leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap" dir="auto">
                 {selectedCitation.excerpt}
               </div>
             </div>

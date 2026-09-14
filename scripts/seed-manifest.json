@@ -35,6 +35,12 @@
     { "title": "Clinical Protocol: Delirium Assessment in Elderly ICU Patients (CAM-ICU)", "category": "Geriatrics", "pages": 5 },
     { "title": "Clinical Protocol: Central Venous Catheter Insertion & Sepsis Bundle", "category": "Critical Care", "pages": 5 },
     { "title": "Clinical Protocol: Antimicrobial Resistance Surveillance Protocol", "category": "Microbiology", "pages": 5 },
-    { "title": "Clinical Protocol: Palliative Symptom Management Guidelines", "category": "Palliative Care", "pages": 5 }
+    { "title": "Clinical Protocol: Palliative Symptom Management Guidelines", "category": "Palliative Care", "pages": 5 },
+    { "title": "بروتوكول سريري: إرشادات جرعات مضادات التخثر وموانع الاستعمال", "category": "أمراض الدم", "pages": 5, "language": "ar" },
+    { "title": "بروتوكول سريري: بروتوكولات إنعاش الإنتان في العناية المركزة", "category": "العناية المركزة", "pages": 5, "language": "ar" },
+    { "title": "بروتوكول سريري: التدخلات القلبية الوعائية الأولية", "category": "أمراض القلب", "pages": 6, "language": "ar" },
+    { "title": "بروتوكول سريري: إدارة التفاعلات الضارة للعلاج الكيميائي", "category": "الأورام", "pages": 5, "language": "ar" },
+    { "title": "بروتوكول سريري: تعديل الجرعات في حالات القصور الكلوي", "category": "أمراض الكلى", "pages": 5, "language": "ar" },
+    { "title": "بروتوكول سريري: بروتوكول السيطرة على نسبة السكر في الدم لمرضى السكري النوع الثاني", "category": "الغدد الصماء", "pages": 5, "language": "ar" }
   ]
 }

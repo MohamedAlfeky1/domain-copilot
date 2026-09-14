@@ -63,7 +63,7 @@ export class IngestionService {
       await this.db.saveDocument(doc);
       version = activeVersion?.contentHash === contentHash
         ? activeVersion
-        : await this.createVersion(doc, contentHash, 1 + (activeVersion?.version || 0));
+        : await this.createVersion(doc, contentHash, 1 + (activeVersion?.version || 0), input.buffer);
     } else {
       const sourceKey = createHash("sha256").update(`${source}\u0000${input.filename}`).digest("hex");
       doc = await this.db.saveDocument({
@@ -76,7 +76,7 @@ export class IngestionService {
         status: "QUEUED",
         createdAt: new Date().toISOString(),
       });
-      version = await this.createVersion(doc, contentHash, 1);
+      version = await this.createVersion(doc, contentHash, 1, input.buffer);
     }
 
     doc = { ...doc, currentVersionId: version.id };
@@ -129,13 +129,24 @@ export class IngestionService {
     }
   }
 
-  private async createVersion(document: Document, contentHash: string, versionNumber: number): Promise<DocumentVersion> {
+  private async createVersion(document: Document, contentHash: string, versionNumber: number, buffer?: Buffer): Promise<DocumentVersion> {
+    // T1 Bilingual: Auto-detect document language from content
+    let language = "en";
+    if (buffer) {
+      const sampleText = buffer.toString("utf-8", 0, Math.min(buffer.length, 2000));
+      const arabicChars = (sampleText.match(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g) || []).length;
+      const latinChars = (sampleText.match(/[a-zA-Z]/g) || []).length;
+      const totalAlpha = arabicChars + latinChars;
+      if (totalAlpha > 0 && arabicChars / totalAlpha >= 0.5) {
+        language = "ar";
+      }
+    }
     return this.db.saveDocumentVersion({
       id: this.stableId("ver", `${document.id}:${contentHash}`),
       documentId: document.id,
       version: versionNumber,
       contentHash,
-      language: "en",
+      language,
       pages: 1,
       isActive: true,
       createdAt: new Date().toISOString(),

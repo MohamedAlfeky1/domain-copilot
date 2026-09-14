@@ -89,7 +89,7 @@ class SecurityToolHarness {
   }
 }
 
-// Production Twist Risk Guard Implementation (T1)
+// Deterministic Side-Effect Risk Guard Implementation (Preserved Safety Feature)
 class TwistGuardSecurityPort {
   constructor() {
     this.twistName = "Deterministic Side-Effect Risk Guard";

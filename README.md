@@ -87,8 +87,9 @@ Per the assessment brief:
 - **Twist ($T_n$)**: $(\sum \text{all digits}) \pmod 8$
 
 The active variant is locked in `src/config/variant.config.ts`:
-- Active Domain: `D1: Clinical Protocol & Drug Safety`
-- Active Twist: `T1: Deterministic Side-Effect Risk Guard`
+- Active Domain: `D0: Healthcare (Clinical Protocols & Patient Safety)`
+- Active Twist: `T1: Bilingual Arabic + English (AR+EN Cross-Lingual RAG & RTL)`
+- Bonus Safety Feature: Deterministic Side-Effect Risk Guard (`ITwistPort.evaluateRiskGuard`)
 
 Placeholder strings like `"D<n>"` will cause the application to fail fast on boot.
 
