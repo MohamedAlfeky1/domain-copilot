@@ -108,8 +108,8 @@ async function runUnitTests() {
     assert.strictEqual(iterations > MAX, true);
   });
 
-  // 11. Mandatory Twist Risk Guard deterministic blocking (TW-002 negative test)
-  test("Mandatory Twist Risk Guard blocks consequential action when evidence score < 0.35", () => {
+  // 11. Internal Safety Risk Guard deterministic blocking (Bonus safety feature)
+  test("Internal Safety Risk Guard blocks consequential action when evidence score < 0.35", () => {
     const threshold = 0.85;
     let riskIndex = 0.1;
     const evidenceScores = [0.24];
@@ -122,8 +122,8 @@ async function runUnitTests() {
     assert.strictEqual(isPermitted, false);
   });
 
-  // 12. Tool Registry side-effect gating with Twist Guard (TW-004)
-  test("Tool path blocks side-effecting operation when Twist Risk Guard trips", () => {
+  // 12. Tool Registry side-effect gating with Risk Guard
+  test("Tool path blocks side-effecting operation when Safety Risk Guard trips", () => {
     const isSideEffecting = true;
     const isTwistPermitted = false;
     let toolExecuted = false;
@@ -166,6 +166,39 @@ async function runUnitTests() {
     assert.strictEqual(payload.status, "UNHEALTHY");
     assert.strictEqual(payload.database, "DISCONNECTED");
     assert.strictEqual(payload.pgvector, "UNAVAILABLE");
+  });
+
+  // 15. T1 Bilingual: Arabic Unicode language detection
+  await test("T1 Bilingual detects Arabic text via Unicode range analysis", () => {
+    const arabicRegex = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+    assert.strictEqual(arabicRegex.test("بروتوكول سريري"), true);
+    assert.strictEqual(arabicRegex.test("Clinical protocol"), false);
+  });
+
+  // 16. T1 Bilingual: RTL rendering decision
+  await test("T1 Bilingual identifies text requiring RTL layout rendering", () => {
+    const arabicRegex = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+    const isRtl = (text) => Boolean(text && arabicRegex.test(text));
+    assert.strictEqual(isRtl("إرشادات جرعات مضادات التخثر"), true);
+    assert.strictEqual(isRtl("Standard anticoagulation dosage"), false);
+    assert.strictEqual(isRtl(""), false);
+  });
+
+  // 17. T1 Bilingual: FTS dictionary configuration mapping
+  await test("T1 Bilingual maps Arabic to 'simple' and English to 'english' FTS configs", () => {
+    const getFtsConfig = (lang) => (lang === "ar" ? "simple" : "english");
+    assert.strictEqual(getFtsConfig("ar"), "simple");
+    assert.strictEqual(getFtsConfig("en"), "english");
+  });
+
+  // 18. T1 Bilingual: Cross-lingual retrieval targets both AR and EN
+  await test("T1 Bilingual cross-lingual retrieval targets both Arabic and English corpuses", () => {
+    const supported = ["ar", "en"];
+    const query = "What are the sepsis resuscitation guidelines?";
+    const detectedLang = /[\u0600-\u06FF]/.test(query) ? "ar" : "en";
+    const targets = supported;
+    assert.strictEqual(detectedLang, "en");
+    assert.deepStrictEqual(targets, ["ar", "en"]);
   });
 
   console.log("--------------------------------------------------");

@@ -169,9 +169,12 @@ export class HybridRetrievalService {
     };
 
     // 2. Parallel Dense Embedding & Execution (RET-001)
+    // Dense search is inherently cross-lingual via text-embedding-3-small (multilingual model)
     const { embedding } = await this.aiProvider.generateEmbedding(query);
 
-    const [denseResults, keywordResults] = await Promise.all([
+    // T1 Bilingual: Run keyword search with both 'english' and 'simple' FTS configs
+    // to enable cross-lingual keyword matching (EN queries find AR content and vice versa)
+    const [denseResults, keywordResultsEN, keywordResultsAR] = await Promise.all([
       this.vectorStore.searchSimilar(embedding, {
         topK: 10,
         minSimilarity: this.minSimilarity,
@@ -179,9 +182,26 @@ export class HybridRetrievalService {
       }),
       this.vectorStore.searchKeyword(query, {
         topK: 10,
+        language: "english",
+        ...appliedFilters,
+      }),
+      this.vectorStore.searchKeyword(query, {
+        topK: 10,
+        language: "simple",
         ...appliedFilters,
       }),
     ]);
+
+    // T1 Bilingual: Merge keyword results from both FTS configs, dedup by chunk ID
+    const seenKeywordChunks = new Set<string>();
+    const keywordResults: typeof keywordResultsEN = [];
+    for (const res of [...keywordResultsEN, ...keywordResultsAR]) {
+      if (!seenKeywordChunks.has(res.chunk.id)) {
+        seenKeywordChunks.add(res.chunk.id);
+        keywordResults.push(res);
+      }
+    }
+    keywordResults.sort((a, b) => b.rankScore - a.rankScore);
 
     // 3. Process Channel Candidates for Telemetry (RET-005)
     const denseCandidates: CandidateTraceItem[] = denseResults.map((d, index) => {

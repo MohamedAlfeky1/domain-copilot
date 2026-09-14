@@ -890,6 +890,11 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
           }
         }
 
+        if (options.language) {
+          sql += ` AND LOWER(dv.language) = LOWER($${paramIdx++})`;
+          params.push(options.language);
+        }
+
         sql += ` ORDER BY rank_score DESC LIMIT $${paramIdx}`;
         params.push(topK);
 

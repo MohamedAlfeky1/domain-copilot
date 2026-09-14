@@ -1,8 +1,8 @@
 # Product Demo Video Script & Storyboard (VIDEO-001)
 
 **Target Video Duration:** 6 Minutes 30 Seconds (Within 5–8 Minute Target)  
-**Assigned Domain:** D1: Clinical Protocol & Drug Safety  
-**Mandatory Twist:** T1: Deterministic Side-Effect Risk Guard  
+**Assigned Domain:** D0: Healthcare (Clinical Protocols & Patient Safety)  
+**Mandatory Twist:** T1: Bilingual Arabic + English (Cross-Lingual RAG & RTL)  
 **Primary AI Model:** OpenAI gpt-4o (Completions) & text-embedding-3-small (1536d)  
 **Presenter:** Lead AI Systems Engineer  
 
@@ -30,9 +30,9 @@
   `{"status": "READY", "database": "CONNECTED", "pgvector": "READY", "totalChunksIndexed": 80}`.
 
 **Spoken Narration (Presenter):**
-> "Hello and welcome to the production demonstration of **Domain Copilot** — an enterprise-grade, assessment-aligned Agentic RAG platform engineered with Clean Hexagonal Architecture, hybrid vector-keyword retrieval, Human-in-the-Loop governance, and deterministic risk guards.
+> "Hello and welcome to the production demonstration of **Domain Copilot** — an enterprise-grade, assessment-aligned Agentic RAG platform engineered with Clean Hexagonal Architecture, hybrid vector-keyword retrieval, Human-in-the-Loop governance, and deterministic safety guards.
 >
-> Our platform is configured for **Domain 1: Clinical Protocol & Drug Safety**, paired with **Mandatory Twist 1: Deterministic Side-Effect Risk Guard**.
+> Our platform is configured for **Domain D0: Healthcare**, paired with our assigned **Mandatory Twist T1: Bilingual Arabic + English**.
 > 
 > Before serving queries, the platform validates system health. A quick inspection of `/readyz` confirms that our real PostgreSQL database and `pgvector` extension are fully connected and initialized."
 
@@ -118,11 +118,13 @@
 - Screen navigates back to Copilot; workflow resumes with signed approval token and commits the update.
 
 **Spoken Narration (Presenter):**
-> "Now let's observe our **Mandatory Twist: Deterministic Side-Effect Risk Guard** in action. We request a high-risk 300% dosage increase.
+> "Now let's observe our **Mandatory Twist T1: Bilingual Arabic + English** and our Safety Risk Guard in action.
 >
-> The Safety Auditor immediately flags an extreme policy contraindication. Our Twist Guard calculates a risk score of 0.85, which hits our strict ceiling.
+> We enter an Arabic clinical query into the Copilot. Notice the dynamic RTL text rendering activates automatically via `dir='auto'`.
 >
-> Instead of executing the side-effecting tool `execute_protocol_update`, the workflow automatically pauses, saving state to memory.
+> Under the hood, our cross-lingual hybrid retrieval queries both Arabic documents using the `simple` FTS dictionary and English documents via `text-embedding-3-small` shared vector representations.
+>
+> When a consequential operation is requested with unverified evidence, our internal Risk Guard deterministically halts execution.
 >
 > Over in the Reviewer Queue at `/reviews`, an authorized Approver inspects the payload, verifies the risk notes, and clicks 'Approve'. This generates a signed, single-use cryptographic token, which our orchestrator consumes to resume the paused run to completion."
 

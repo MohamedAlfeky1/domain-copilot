@@ -94,14 +94,16 @@ async function runHybridRetrievalTestSuite() {
   await db.query(`
     INSERT INTO documents VALUES
       ('doc-alpha', 'oncology_protocol.pdf', 'Oncology Protocol Alpha', 'application/pdf', 'hash-alpha', 'INDEXED', NOW()),
-      ('doc-beta', 'pediatric_guidelines.docx', 'Pediatric Guidelines Beta', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'hash-beta', 'INDEXED', NOW());
+      ('doc-beta', 'pediatric_guidelines.docx', 'Pediatric Guidelines Beta', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'hash-beta', 'INDEXED', NOW()),
+      ('doc-gamma', 'arabic_anticoagulation.pdf', 'بروتوكول سريري: مضادات التخثر', 'application/pdf', 'hash-gamma', 'INDEXED', NOW());
   `);
 
   await db.query(`
     INSERT INTO document_versions VALUES
       ('ver-alpha-v1', 'doc-alpha', 1, 'hash-a1', 'english', 10, FALSE, NOW() - INTERVAL '30 days'),
       ('ver-alpha-v2', 'doc-alpha', 2, 'hash-a2', 'english', 12, TRUE, NOW()),
-      ('ver-beta-v1', 'doc-beta', 1, 'hash-b1', 'english', 8, TRUE, NOW());
+      ('ver-beta-v1', 'doc-beta', 1, 'hash-b1', 'english', 8, TRUE, NOW()),
+      ('ver-gamma-v1', 'doc-gamma', 1, 'hash-g1', 'ar', 5, TRUE, NOW());
   `);
 
   // Chunks:
@@ -116,7 +118,8 @@ async function runHybridRetrievalTestSuite() {
       ('chk-a2-1', 'ver-alpha-v2', 0, 'Dosage', 3, 'Clause 4.1', 'REVISED ACTIVE: Adult starting dosage is 10mg orally once daily, titrating to maximum 20mg.', 16, '{"documentName":"Oncology Protocol Alpha","version":2,"source":"oncology_protocol.pdf"}', NOW()),
       ('chk-a2-2', 'ver-alpha-v2', 1, 'Cardiac Safety', 6, 'Clause 5.2', 'Patients with pre-existing arrhythmia require baseline 12-lead ECG monitoring before therapy.', 14, '{"documentName":"Oncology Protocol Alpha","version":2,"source":"oncology_protocol.pdf"}', NOW()),
       ('chk-a2-3', 'ver-alpha-v2', 2, 'Adverse Events', 11, 'Clause 8.3', 'Reported adverse reactions include grade 2 neutropenia and mild fatigue during cycle 1.', 15, '{"documentName":"Oncology Protocol Alpha","version":2,"source":"oncology_protocol.pdf"}', NOW()),
-      ('chk-b1-1', 'ver-beta-v1', 0, 'Pediatric Contraindications', 2, 'Section 2', 'Contraindicated in pediatric patients under 12 years of age due to growth plate arrest risk.', 16, '{"documentName":"Pediatric Guidelines Beta","version":1,"source":"pediatric_guidelines.docx"}', NOW());
+      ('chk-b1-1', 'ver-beta-v1', 0, 'Pediatric Contraindications', 2, 'Section 2', 'Contraindicated in pediatric patients under 12 years of age due to growth plate arrest risk.', 16, '{"documentName":"Pediatric Guidelines Beta","version":1,"source":"pediatric_guidelines.docx"}', NOW()),
+      ('chk-g1-1', 'ver-gamma-v1', 0, 'موانع الاستعمال', 3, 'القسم 3', 'موانع الاستعمال المطلقة: يُحظر الاستخدام المتزامن مع مثبطات مونوامين أوكسيديز ومضادات التخثر الفموية بسبب مخاطر النزيف الحاد.', 20, '{"documentName":"بروتوكول سريري: مضادات التخثر","version":1,"source":"arabic_anticoagulation.pdf","language":"ar"}', NOW());
   `);
 
   // Embeddings (normalized 4-dimensional vectors for deterministic cosine calculation)
@@ -125,13 +128,15 @@ async function runHybridRetrievalTestSuite() {
   // chk-a2-1 vector (dosage): [0.1, 0.9, 0.1, 0.0] -> Cosine sim ~ 0.20
   // chk-a1-1 vector (stale dosage): [0.1, 0.85, 0.1, 0.0] -> Cosine sim ~ 0.19
   // chk-b1-1 vector (pediatric): [0.05, 0.05, 0.9, 0.1] -> Cosine sim ~ 0.12
+  // chk-g1-1 vector (anticoagulant/cross-lingual): [0.85, 0.1, 0.05, 0.5]
   await db.query(`
     INSERT INTO chunk_embeddings VALUES
       ('emb-a1-1', 'chk-a1-1', 'test-emb', 4, '[0.1, 0.85, 0.1, 0.0]', NOW()),
       ('emb-a2-1', 'chk-a2-1', 'test-emb', 4, '[0.1, 0.9, 0.1, 0.0]', NOW()),
       ('emb-a2-2', 'chk-a2-2', 'test-emb', 4, '[0.95, 0.05, 0.05, 0.0]', NOW()),
       ('emb-a2-3', 'chk-a2-3', 'test-emb', 4, '[0.3, 0.3, 0.3, 0.1]', NOW()),
-      ('emb-b1-1', 'chk-b1-1', 'test-emb', 4, '[0.05, 0.05, 0.9, 0.1]', NOW());
+      ('emb-b1-1', 'chk-b1-1', 'test-emb', 4, '[0.05, 0.05, 0.9, 0.1]', NOW()),
+      ('emb-g1-1', 'chk-g1-1', 'test-emb', 4, '[0.85, 0.1, 0.05, 0.5]', NOW());
   `);
 
   // ---------------------------------------------------------------------------
@@ -439,6 +444,57 @@ async function runHybridRetrievalTestSuite() {
     assert.ok(trace.fusedResults[0].explanation.includes("Elevated by dual-channel match"));
     assert.strictEqual(trace.selectedChunks[0], "chk-a2-2");
     assert.ok(trace.fusionFormula.includes("RRF(d)"));
+  });
+
+  // ---------------------------------------------------------------------------
+  // RET-T1: Bilingual Arabic FTS Retrieval & Cross-Lingual Search
+  // ---------------------------------------------------------------------------
+  await testStep("RET-T1", "Arabic FTS search using 'simple' configuration retrieves Arabic chunk", async () => {
+    const query = "موانع الاستعمال";
+    const res = await db.query(`
+      SELECT c.id, c.text, ts_rank_cd(to_tsvector('simple', c.text), plainto_tsquery('simple', $1)) AS rank_score
+      FROM chunks c
+      JOIN document_versions dv ON c.document_version_id = dv.id
+      WHERE dv.is_active = TRUE
+        AND to_tsvector('simple', c.text) @@ plainto_tsquery('simple', $1)
+      ORDER BY rank_score DESC;
+    `, [query]);
+
+    assert.strictEqual(res.rows.length, 1, "Should retrieve Arabic chunk via simple FTS");
+    assert.strictEqual(res.rows[0].id, "chk-g1-1");
+    assert.ok(Number(res.rows[0].rank_score) > 0);
+  });
+
+  await testStep("RET-T1", "Cross-lingual dense vector search retrieves Arabic chunk in shared space", async () => {
+    // English query vector that projects close to the Arabic anticoagulation chunk
+    const queryVec = "[0.8, 0.1, 0.1, 0.5]";
+    const res = await db.query(`
+      SELECT c.id, c.text, dv.language, (1 - (ce.vector <=> $1::vector)) AS similarity
+      FROM chunks c
+      JOIN chunk_embeddings ce ON c.id = ce.chunk_id
+      JOIN document_versions dv ON c.document_version_id = dv.id
+      WHERE dv.is_active = TRUE
+      ORDER BY ce.vector <=> $1::vector ASC
+      LIMIT 1;
+    `, [queryVec]);
+
+    assert.strictEqual(res.rows.length, 1);
+    assert.strictEqual(res.rows[0].id, "chk-g1-1", "Top candidate in cross-lingual space should be Arabic chunk");
+    assert.strictEqual(res.rows[0].language, "ar");
+  });
+
+  await testStep("RET-T1", "Language scope filter strictly isolates Arabic document versions", async () => {
+    const res = await db.query(`
+      SELECT c.id, dv.language
+      FROM chunks c
+      JOIN document_versions dv ON c.document_version_id = dv.id
+      WHERE dv.is_active = TRUE
+        AND LOWER(dv.language) = 'ar';
+    `);
+
+    assert.strictEqual(res.rows.length, 1);
+    assert.strictEqual(res.rows[0].id, "chk-g1-1");
+    assert.strictEqual(res.rows[0].language, "ar");
   });
 
   // ---------------------------------------------------------------------------

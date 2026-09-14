@@ -326,10 +326,10 @@ export default function RunTracePage() {
                 <div>
                   <h3 className="text-sm font-bold text-white font-mono flex items-center gap-2">
                     <ShieldAlert className="w-4 h-4 text-sky-400" />
-                    MANDATORY RISK GUARD TELEMETRY
+                    SAFETY RISK GUARD TELEMETRY
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Deterministic Side-Effect Risk Guard · Enforces assigned variant risk floor
+                    Deterministic Side-Effect Risk Guard · Enforces clinical safety risk floor
                   </p>
                 </div>
 
