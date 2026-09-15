@@ -29,7 +29,8 @@ async function request(path, options = {}) {
     headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(options.body);
   }
-  const res = await fetch(url, { ...options, headers });
+  const redirectMode = options.redirect !== undefined ? options.redirect : "manual";
+  const res = await fetch(url, { ...options, headers, redirect: redirectMode });
   let data = null;
   const contentType = res.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -344,6 +345,80 @@ async function runAuthRbacTestSuite() {
       body: { approvalId: "app-mismatched-id" },
     });
     assert.ok([403, 404].includes(resumeRes.status), `Expected 403 or 404, got ${resumeRes.status}`);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 7. UI Entry Flow & Page Route Protection
+  // ---------------------------------------------------------------------------
+  await testCase("FLOW-001", "Unauthenticated user visiting / is redirected to /login (307)", async () => {
+    const res = await request("/");
+    assert.strictEqual(res.status, 307);
+    assert.strictEqual(res.headers.get("location"), "/login");
+  });
+
+  await testCase("FLOW-002", "Unauthenticated user visiting /dashboard is redirected to /login (307)", async () => {
+    const res = await request("/dashboard");
+    assert.strictEqual(res.status, 307);
+    assert.ok(res.headers.get("location").startsWith("/login"));
+  });
+
+  await testCase("FLOW-003", "Unauthenticated user cannot access protected application pages (/corpus, /copilot, /reviews, /evaluation)", async () => {
+    for (const path of ["/corpus", "/copilot", "/reviews", "/evaluation"]) {
+      const res = await request(path);
+      assert.strictEqual(res.status, 307, `Expected 307 redirect for unauthenticated access to ${path}`);
+      assert.ok(res.headers.get("location").startsWith("/login"), `Expected redirect to /login for ${path}`);
+    }
+  });
+
+  await testCase("FLOW-004", "Unauthenticated user can access /login page directly (200)", async () => {
+    const res = await request("/login");
+    assert.strictEqual(res.status, 200);
+  });
+
+  await testCase("FLOW-005", "Valid credentials login succeeds, derives role from server, and sets session cookie", async () => {
+    const res = await request("/api/auth/login", {
+      method: "POST",
+      body: { email: "approver@domaincopilot.ai", password: "approver123" },
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.data.user.role, "APPROVER");
+    assert.ok(res.headers.get("set-cookie"), "Login must set session cookie");
+  });
+
+  await testCase("FLOW-006", "Authenticated user with session cookie can access /dashboard (200)", async () => {
+    const loginRes = await request("/api/auth/login", {
+      method: "POST",
+      body: { email: "expert@domaincopilot.ai", password: "expert123" },
+    });
+    const cookie = loginRes.headers.get("set-cookie").split(";")[0];
+    const dashRes = await request("/dashboard", {
+      headers: { Cookie: cookie },
+    });
+    assert.strictEqual(dashRes.status, 200);
+  });
+
+  await testCase("FLOW-007", "Authenticated user visiting /login is redirected to /dashboard (307)", async () => {
+    const loginRes = await request("/api/auth/login", {
+      method: "POST",
+      body: { email: "viewer@domaincopilot.ai", password: "viewer123" },
+    });
+    const cookie = loginRes.headers.get("set-cookie").split(";")[0];
+    const loginPageRes = await request("/login", {
+      headers: { Cookie: cookie },
+    });
+    assert.strictEqual(loginPageRes.status, 307);
+    assert.strictEqual(loginPageRes.headers.get("location"), "/dashboard");
+  });
+
+  await testCase("FLOW-008", "Logout clears session cookie and subsequent /dashboard access is redirected to /login", async () => {
+    const logoutRes = await request("/api/auth/logout", { method: "POST" });
+    assert.strictEqual(logoutRes.status, 200);
+    const expireCookie = logoutRes.headers.get("set-cookie") || "";
+    assert.ok(expireCookie.includes("Max-Age=0") || expireCookie.includes("Expires="));
+
+    const postLogoutDash = await request("/dashboard");
+    assert.strictEqual(postLogoutDash.status, 307);
+    assert.ok(postLogoutDash.headers.get("location").startsWith("/login"));
   });
 
   console.log("================================================================================");

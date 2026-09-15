@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
     }
 
-    const token = issueAuthToken(user);
+    const token = await issueAuthToken(user);
 
     const response = NextResponse.json({
       token,

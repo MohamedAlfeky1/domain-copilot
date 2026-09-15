@@ -2,6 +2,9 @@
 const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
+  env: {
+    JWT_SECRET: process.env.JWT_SECRET || "domain-copilot-assessment-secure-jwt-key-32-chars",
+  },
   experimental: {
     serverComponentsExternalPackages: ["@electric-sql/pglite", "pg"],
     cpus: 1,

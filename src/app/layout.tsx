@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
 import { ACTIVE_VARIANT } from "@/config/variant.config";
-import { cookies } from "next/headers";
-import { verifyAuthToken } from "@/infrastructure/auth/auth-guard";
+import { cookies, headers } from "next/headers";
+import { verifyAuthToken } from "@/infrastructure/auth/tokens";
 import { container } from "@/core/application/container";
 import { UserSessionWidget } from "./user-session-widget";
 import {
@@ -15,7 +15,6 @@ import {
   Award,
   Settings,
   Sparkles,
-  UserCheck,
 } from "lucide-react";
 
 export const metadata: Metadata = {
@@ -28,17 +27,33 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = headers().get("x-pathname") || "";
+  const isLoginPage = pathname === "/login";
+
+  // Login page is rendered standalone without the application chrome/sidebar
+  if (isLoginPage) {
+    return (
+      <html lang="en" className="dark">
+        <body className="bg-slate-950 text-slate-100 min-h-screen antialiased">
+          {children}
+        </body>
+      </html>
+    );
+  }
+
   const cookieStore = cookies();
   const token = cookieStore.get("dc_token")?.value;
   let currentUser = null;
   if (token) {
-    const payload = verifyAuthToken(token);
+    const payload = await verifyAuthToken(token);
     if (payload?.id) {
       currentUser = await container.db.getUserById(payload.id);
     }
   }
-  const displayName = currentUser ? currentUser.email.split("@")[0] : "Dr. Approver";
-  const displayRole = currentUser ? currentUser.role : "APPROVER";
+
+  const displayName = currentUser ? currentUser.email.split("@")[0] : "Authenticated";
+  const displayRole = currentUser ? currentUser.role : "EXPERT";
+
   return (
     <html lang="en" className="dark">
       <body className="bg-slate-950 text-slate-100 flex h-screen overflow-hidden antialiased">
@@ -114,7 +129,10 @@ export default async function RootLayout({
 
           {/* User Session Footer */}
           <div className="p-3 border-t border-slate-800 bg-slate-950/40">
-            <UserSessionWidget initialRole={displayRole} initialEmail={currentUser?.email || "approver@domaincopilot.ai"} />
+            <UserSessionWidget
+              initialRole={displayRole}
+              initialEmail={currentUser?.email || "expert@domaincopilot.ai"}
+            />
           </div>
         </aside>
 
