@@ -10,7 +10,11 @@ export interface AuthSessionPayload {
 }
 
 export function sessionSecret(): string {
-  return process.env.JWT_SECRET || "domain-copilot-assessment-secure-jwt-key-32-chars";
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.trim().length < 32) {
+    throw new Error("JWT_SECRET environment variable is missing or shorter than 32 characters.");
+  }
+  return secret.trim();
 }
 
 function toBase64Url(base64: string): string {
@@ -93,6 +97,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export async function verifyAuthToken(token: string): Promise<AuthSessionPayload | null> {
+  sessionSecret();
   try {
     const [encodedPayload, signature, ...rest] = token.split(".");
     if (!encodedPayload || !signature || rest.length > 0) return null;

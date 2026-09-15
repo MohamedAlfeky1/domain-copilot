@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
-import { extractAuthToken, verifyAuthToken, sign, sessionSecret } from "./infrastructure/auth/tokens";
+import { extractAuthToken, verifyAuthToken } from "./infrastructure/auth/tokens";
 
 const PROTECTED_PAGE_PREFIXES = [
   "/dashboard",
