@@ -16,6 +16,7 @@ export interface IngestionInput {
   mimeType: string;
   buffer: Buffer;
   source?: string;
+  ownerId?: string;
 }
 
 const STAGE_PROGRESS: Record<IngestionStage, number> = {
@@ -74,6 +75,7 @@ export class IngestionService {
         sizeBytes: input.buffer.length,
         contentHash,
         status: "QUEUED",
+        ownerId: input.ownerId,
         createdAt: new Date().toISOString(),
       });
       version = await this.createVersion(doc, contentHash, 1, input.buffer);

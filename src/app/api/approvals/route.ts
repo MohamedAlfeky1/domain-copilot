@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { container } from "@/core/application/container";
+import { requireRole } from "@/infrastructure/auth/auth-guard";
 
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   try {
+    await requireRole(req, ["ADMIN", "APPROVER"]);
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status") as any;
 
@@ -15,12 +17,13 @@ export async function GET(req: NextRequest) {
       pendingCount: approvals.filter((a) => a.status === "PENDING").length,
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: error.httpStatus || 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    await requireRole(req, ["ADMIN", "APPROVER"]);
     const body = await req.json();
     const { runId, toolCallId, proposedAction, riskLevel, requesterAgent, payload } = body;
 
@@ -39,6 +42,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(approval, { status: 201 });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: error.httpStatus || 500 });
   }
 }

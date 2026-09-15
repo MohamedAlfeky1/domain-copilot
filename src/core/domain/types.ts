@@ -8,6 +8,7 @@ export type UserRole = "ADMIN" | "APPROVER" | "EXPERT" | "VIEWER";
 export interface User {
   id: string;
   email: string;
+  passwordHash: string;
   role: UserRole;
   status: "ACTIVE" | "INACTIVE";
   createdAt: string;
@@ -25,6 +26,7 @@ export interface Document {
   contentHash: string;
   currentVersionId?: string;
   status: IngestionStatus;
+  ownerId?: string;
   createdAt: string;
 }
 
@@ -108,6 +110,7 @@ export interface Citation {
 
 export interface Run {
   id: string;
+  ownerId: string;
   sessionId: string;
   correlationId: string;
   query: string;

@@ -17,7 +17,7 @@ export async function POST(
   try {
     const user = await requireRole(req, ["ADMIN", "APPROVER"]);
     const body = await req.json();
-    const { reason, reviewerId } = body;
+    const { reason } = body;
 
     if (!reason || reason.trim().length === 0) {
       return NextResponse.json(
@@ -28,7 +28,7 @@ export async function POST(
 
     const approval = await container.approvalService.reject(
       params.id,
-      reviewerId || "usr-approver-001",
+      user.id,
       reason
     );
 

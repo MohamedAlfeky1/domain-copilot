@@ -7,6 +7,7 @@
 import { NextRequest } from "next/server";
 import { container } from "@/core/application/container";
 import { runControllerRegistry } from "@/core/application/run-controller";
+import { requireRole } from "@/infrastructure/auth/auth-guard";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,7 @@ export async function POST(
   const runId = params.id;
 
   try {
+    await requireRole(req, ["ADMIN", "APPROVER"]);
     const body = await req.json();
     const { approvalId } = body;
 
@@ -49,6 +51,12 @@ export async function POST(
       return new Response(
         JSON.stringify({ error: "Approval not found" }),
         { status: 404, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    if (approval.runId !== runId) {
+      return new Response(
+        JSON.stringify({ error: "Approval does not belong to this run" }),
+        { status: 403, headers: { "Content-Type": "application/json" } }
       );
     }
 
@@ -107,7 +115,7 @@ export async function POST(
   } catch (error: any) {
     return new Response(
       JSON.stringify({ error: error.message }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      { status: error.httpStatus || 500, headers: { "Content-Type": "application/json" } }
     );
   }
 }
