@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { container } from "@/core/application/container";
 import fs from "fs";
 import path from "path";
+import { requireAuth, requireRole } from "@/infrastructure/auth/auth-guard";
 
 export const runtime = "nodejs";
 
@@ -18,8 +19,9 @@ function loadFixturesEvalResults() {
   return null;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    await requireAuth(req);
     const dbResults = await container.db.listEvaluationResults();
     const evalData = loadFixturesEvalResults();
 
@@ -55,12 +57,13 @@ export async function GET() {
       evaluatedAt: evalData?.evaluatedAt || new Date().toISOString(),
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: error.httpStatus || 500 });
   }
 }
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
+    await requireRole(req, ["ADMIN"]);
     const evalData = loadFixturesEvalResults();
     if (evalData && evalData.results) {
       // Record evaluation results in database ledger
@@ -93,6 +96,6 @@ export async function POST() {
       recentResults: evalData?.results || [],
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: error.httpStatus || 500 });
   }
 }

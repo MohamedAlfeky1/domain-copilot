@@ -12,6 +12,7 @@
     "test": "node scripts/test-unit.js",
     "test:unit": "node scripts/test-unit.js",
     "test:integration": "node scripts/test-integration.js",
+    "test:auth": "node scripts/test-auth-rbac.js",
     "test:retrieval": "node scripts/test-retrieval.js",
     "test:security": "node scripts/test-security.js",
     "test:corpus": "node scripts/test-corpus.js",

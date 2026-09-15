@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runControllerRegistry } from "@/core/application/run-controller";
 import { container } from "@/core/application/container";
+import { requireAuth, requireRunAccess } from "@/infrastructure/auth/auth-guard";
 
 export const runtime = "nodejs";
 
@@ -9,12 +10,14 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
+    const user = await requireAuth(req);
     const runId = params.id;
     const run = await container.db.getRunById(runId);
 
     if (!run) {
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
     }
+    requireRunAccess(user, run);
 
     const cancelled = runControllerRegistry.cancelRun(runId);
     await container.db.updateRunStatus(runId, "CANCELLED");
@@ -25,6 +28,6 @@ export async function POST(
       status: "CANCELLED",
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: error.httpStatus || 500 });
   }
 }

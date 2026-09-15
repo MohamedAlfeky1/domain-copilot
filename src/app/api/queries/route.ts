@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { container } from "@/core/application/container";
 import { runControllerRegistry } from "@/core/application/run-controller";
+import { requireRole } from "@/infrastructure/auth/auth-guard";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await requireRole(req, ["ADMIN", "APPROVER", "EXPERT"]);
     const body = await req.json();
-    const { query, sessionId, filters } = body;
+    const { query, filters } = body;
 
     if (!query || query.trim().length === 0) {
       return NextResponse.json({ error: "Query cannot be empty" }, { status: 400 });
@@ -31,7 +33,8 @@ export async function POST(req: NextRequest) {
     // Create active run
     const run = await container.db.saveRun({
       id: runId,
-      sessionId: sessionId || "default-session",
+      ownerId: user.id,
+      sessionId: `session-${user.id}`,
       correlationId,
       query,
       status: "STARTED",
@@ -52,6 +55,6 @@ export async function POST(req: NextRequest) {
     response.headers.set("x-correlation-id", correlationId);
     return response;
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: error.httpStatus || 500 });
   }
 }

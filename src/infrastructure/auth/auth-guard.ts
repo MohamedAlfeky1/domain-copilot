@@ -1,116 +1,81 @@
-/**
- * DOMAIN COPILOT - SERVER-SIDE AUTHENTICATION & RBAC GUARD (DEV-003)
- * Enforces role-based access control and object ownership validation.
- * Supports Bearer tokens, HTTP-only cookies, and role hierarchies.
- */
-
 import { NextRequest } from "next/server";
 import { container } from "../../core/application/container";
-import { User } from "../../core/domain/types";
-import { UnauthorizedError, ForbiddenError } from "../../core/domain/errors";
+import { Document, Run, User, UserRole } from "../../core/domain/types";
+import { ForbiddenError, UnauthorizedError } from "../../core/domain/errors";
+import {
+  SESSION_TTL_SECONDS,
+  AuthSessionPayload,
+  issueAuthToken,
+  publicUser,
+  extractAuthToken,
+  verifyAuthToken,
+  sessionSecret,
+  sign,
+} from "./tokens";
 
-export interface AuthSessionPayload {
-  id: string;
-  email: string;
-  role: User["role"];
-  issuedAt?: number;
+export {
+  SESSION_TTL_SECONDS,
+  type AuthSessionPayload,
+  issueAuthToken,
+  publicUser,
+  extractAuthToken,
+  verifyAuthToken,
+  sessionSecret,
+  sign,
+};
+
+const ROLE_VALUES: UserRole[] = ["ADMIN", "APPROVER", "EXPERT", "VIEWER"];
+
+async function getTestUser(req: NextRequest): Promise<User | null> {
+  if (process.env.NODE_ENV !== "test" || process.env.ALLOW_TEST_AUTH !== "true") return null;
+  const role = req.headers.get("x-test-role") as UserRole | null;
+  const userId = req.headers.get("x-test-user-id");
+  if (!role || !ROLE_VALUES.includes(role) || !userId) return null;
+  const user = await container.db.getUserById(userId);
+  return user?.role === role && user.status === "ACTIVE" ? user : null;
 }
 
-/**
- * Extract authentication token from Authorization header or dc_token cookie.
- */
-export function extractAuthToken(req: NextRequest): string | null {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    return authHeader.replace("Bearer ", "").trim();
-  }
-  const cookieToken = req.cookies.get("dc_token")?.value;
-  if (cookieToken) {
-    return cookieToken.trim();
-  }
-  return null;
-}
-
-/**
- * Verify and decode session token payload.
- */
-export function verifyAuthToken(token: string): AuthSessionPayload | null {
-  try {
-    const raw = token.startsWith("jwt-") ? token.replace("jwt-", "") : token;
-    const jsonStr = Buffer.from(raw, "base64").toString("utf-8");
-    const payload = JSON.parse(jsonStr);
-    if (payload && payload.id && payload.role) {
-      return payload as AuthSessionPayload;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Get authenticated user from request, or null if unauthenticated.
- */
 export async function getAuthenticatedUser(req: NextRequest): Promise<User | null> {
-  // Support explicit test principal header for headless integration tests
-  const testRole = req.headers.get("x-test-role") as User["role"] | null;
-  const testUserId = req.headers.get("x-test-user-id");
-  if (testRole) {
-    return {
-      id: testUserId || `usr-${testRole.toLowerCase()}-001`,
-      email: `${testRole.toLowerCase()}@domaincopilot.ai`,
-      role: testRole,
-      status: "ACTIVE",
-      createdAt: new Date().toISOString(),
-    };
-  }
+  const testUser = await getTestUser(req);
+  if (testUser) return testUser;
 
   const token = extractAuthToken(req);
-  if (!token) {
-    return null;
-  }
-
-  const payload = verifyAuthToken(token);
-  if (!payload) {
-    return null;
-  }
+  if (!token) return null;
+  const payload = await verifyAuthToken(token);
+  if (!payload) return null;
 
   const user = await container.db.getUserById(payload.id);
-  if (user) {
-    return user;
-  }
-
-  // Fallback to payload identity if DB record was transient
-  return {
-    id: payload.id,
-    email: payload.email,
-    role: payload.role,
-    status: "ACTIVE",
-    createdAt: new Date().toISOString(),
-  };
+  return user?.status === "ACTIVE" ? user : null;
 }
 
-/**
- * Require valid authentication; throws UnauthorizedError (401) if unauthenticated.
- */
 export async function requireAuth(req: NextRequest): Promise<User> {
   const user = await getAuthenticatedUser(req);
-  if (!user) {
-    throw new UnauthorizedError("Authentication required. Please provide a valid session token.");
+  if (!user) throw new UnauthorizedError("Authentication required.");
+  return user;
+}
+
+export async function requireRole(req: NextRequest, allowedRoles: UserRole[]): Promise<User> {
+  const user = await requireAuth(req);
+  if (!allowedRoles.includes(user.role)) {
+    throw new ForbiddenError("Access denied for this role.");
   }
   return user;
 }
 
-/**
- * Require specific roles; throws UnauthorizedError (401) if not logged in,
- * or ForbiddenError (403) if user has insufficient privileges.
- */
-export async function requireRole(req: NextRequest, allowedRoles: User["role"][]): Promise<User> {
-  const user = await requireAuth(req);
-  if (!allowedRoles.includes(user.role)) {
-    throw new ForbiddenError(
-      `Access denied: Role "${user.role}" does not have required permissions. Allowed roles: ${allowedRoles.join(", ")}`
-    );
+export function canAccessRun(user: User, run: Run): boolean {
+  return user.role === "ADMIN" || run.ownerId === user.id;
+}
+
+export function requireRunAccess(user: User, run: Run): void {
+  if (!canAccessRun(user, run)) throw new ForbiddenError("You do not have access to this run.");
+}
+
+export function canManageDocument(user: User, document: Document): boolean {
+  return user.role === "ADMIN" || user.role === "APPROVER" || document.ownerId === user.id;
+}
+
+export function requireDocumentManagementAccess(user: User, document: Document): void {
+  if (!canManageDocument(user, document)) {
+    throw new ForbiddenError("You do not have permission to modify this document.");
   }
-  return user;
 }

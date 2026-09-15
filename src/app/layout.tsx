@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
 import { ACTIVE_VARIANT } from "@/config/variant.config";
+import { cookies, headers } from "next/headers";
+import { verifyAuthToken } from "@/infrastructure/auth/tokens";
+import { container } from "@/core/application/container";
+import { UserSessionWidget } from "./user-session-widget";
 import {
   LayoutDashboard,
   Database,
@@ -11,7 +15,6 @@ import {
   Award,
   Settings,
   Sparkles,
-  UserCheck,
 } from "lucide-react";
 
 export const metadata: Metadata = {
@@ -19,11 +22,38 @@ export const metadata: Metadata = {
   description: "Assessment-Aligned Agentic RAG Platform with Hybrid Retrieval, HITL Governance & Clean Architecture",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = headers().get("x-pathname") || "";
+  const isLoginPage = pathname === "/login";
+
+  // Login page is rendered standalone without the application chrome/sidebar
+  if (isLoginPage) {
+    return (
+      <html lang="en" className="dark">
+        <body className="bg-slate-950 text-slate-100 min-h-screen antialiased">
+          {children}
+        </body>
+      </html>
+    );
+  }
+
+  const cookieStore = cookies();
+  const token = cookieStore.get("dc_token")?.value;
+  let currentUser = null;
+  if (token) {
+    const payload = await verifyAuthToken(token);
+    if (payload?.id) {
+      currentUser = await container.db.getUserById(payload.id);
+    }
+  }
+
+  const displayName = currentUser ? currentUser.email.split("@")[0] : "Authenticated";
+  const displayRole = currentUser ? currentUser.role : "EXPERT";
+
   return (
     <html lang="en" className="dark">
       <body className="bg-slate-950 text-slate-100 flex h-screen overflow-hidden antialiased">
@@ -99,15 +129,10 @@ export default function RootLayout({
 
           {/* User Session Footer */}
           <div className="p-3 border-t border-slate-800 bg-slate-950/40">
-            <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-md bg-slate-800/60">
-              <div className="w-7 h-7 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold text-xs">
-                <UserCheck className="w-3.5 h-3.5" />
-              </div>
-              <div className="overflow-hidden">
-                <p className="text-xs font-semibold text-slate-200 truncate">Dr. Approver</p>
-                <p className="text-[10px] text-emerald-400 font-mono">ROLE: APPROVER</p>
-              </div>
-            </div>
+            <UserSessionWidget
+              initialRole={displayRole}
+              initialEmail={currentUser?.email || "expert@domaincopilot.ai"}
+            />
           </div>
         </aside>
 
