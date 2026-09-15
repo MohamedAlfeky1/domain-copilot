@@ -42,6 +42,7 @@ import { vector } from "@electric-sql/pglite/vector";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { hashPassword } from "../auth/passwords";
 
 export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   // In-memory dual-layer storage
@@ -381,6 +382,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
     const adminUser: User = {
       id: "usr-admin-001",
       email: "admin@domaincopilot.ai",
+      passwordHash: hashPassword("admin123"),
       role: "ADMIN",
       status: "ACTIVE",
       createdAt: new Date().toISOString(),
@@ -388,6 +390,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
     const approverUser: User = {
       id: "usr-approver-001",
       email: "approver@domaincopilot.ai",
+      passwordHash: hashPassword("approver123"),
       role: "APPROVER",
       status: "ACTIVE",
       createdAt: new Date().toISOString(),
@@ -395,13 +398,23 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
     const expertUser: User = {
       id: "usr-expert-001",
       email: "expert@domaincopilot.ai",
+      passwordHash: hashPassword("expert123"),
       role: "EXPERT",
+      status: "ACTIVE",
+      createdAt: new Date().toISOString(),
+    };
+    const viewerUser: User = {
+      id: "usr-viewer-001",
+      email: "viewer@domaincopilot.ai",
+      passwordHash: hashPassword("viewer123"),
+      role: "VIEWER",
       status: "ACTIVE",
       createdAt: new Date().toISOString(),
     };
     this.users.set(adminUser.id, adminUser);
     this.users.set(approverUser.id, approverUser);
     this.users.set(expertUser.id, expertUser);
+    this.users.set(viewerUser.id, viewerUser);
   }
 
   // --- Scope Validation (RET-002) ---
@@ -462,6 +475,9 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
 
   // --- Users ---
   async getUserByEmail(email: string): Promise<User | null> {
+    if (!this.users.has("usr-viewer-001") || !this.users.get("usr-admin-001")?.passwordHash) {
+      this.seedDefaultUsers();
+    }
     for (const u of this.users.values()) {
       if (u.email.toLowerCase() === email.toLowerCase()) return u;
     }
@@ -469,6 +485,9 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   }
 
   async getUserById(id: string): Promise<User | null> {
+    if (!this.users.has("usr-viewer-001") || !this.users.get("usr-admin-001")?.passwordHash) {
+      this.seedDefaultUsers();
+    }
     return this.users.get(id) || null;
   }
 
