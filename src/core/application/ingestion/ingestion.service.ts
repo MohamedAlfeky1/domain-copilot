@@ -1,15 +1,15 @@
 /**
- * DOMAIN COPILOT - INGESTION PIPELINE SERVICE
- * Implements 5-stage pipeline: Extract -> Clean -> Chunk -> Embed -> Index
- * Features: Idempotent re-ingestion, versioning, structure-aware chunking, stable IDs.
+ * Five-stage ingestion pipeline (ING-001 to ING-007).
+ * Every stage is persisted before and after execution, which makes a failed
+ * upload observable and safe to retry with the same source bytes.
  */
-
 import { createHash } from "crypto";
-import { Document, DocumentVersion, Chunk, IngestionJob } from "../../domain/types";
+import { Document, DocumentVersion, Chunk, IngestionJob, IngestionStage } from "../../domain/types";
 import { IDatabasePort } from "../ports/database.port";
 import { IVectorStorePort } from "../ports/vector-store.port";
 import { IAIProviderPort } from "../ports/ai-provider.port";
 import { IngestionFailedError } from "../../domain/errors";
+import { DeterministicCleaner, ExtractorRegistry, ExtractionResult } from "./extraction";
 
 export interface IngestionInput {
   filename: string;
@@ -18,212 +18,205 @@ export interface IngestionInput {
   source?: string;
 }
 
+const STAGE_PROGRESS: Record<IngestionStage, number> = {
+  EXTRACT: 15,
+  CLEAN: 35,
+  CHUNK: 55,
+  EMBED: 75,
+  INDEX: 92,
+};
+
 export class IngestionService {
+  private readonly extractors = new ExtractorRegistry();
+  private readonly cleaner = new DeterministicCleaner();
+
   constructor(
     private db: IDatabasePort,
     private vectorStore: IVectorStorePort,
     private aiProvider: IAIProviderPort
   ) {}
 
-  async ingestDocument(input: IngestionInput): Promise<{ document: Document; version: DocumentVersion; job: IngestionJob }> {
+  async ingestDocument(input: IngestionInput): Promise<{ document: Document; version: DocumentVersion; job: IngestionJob; duplicate: boolean }> {
+    const source = input.source || input.filename;
     const contentHash = createHash("sha256").update(input.buffer).digest("hex");
-    const rawText = input.buffer.toString("utf-8"); // Supports text, markdown, synthetic corpus
-
-    // 1. Check existing document for idempotency (ING-006)
-    let doc = await this.db.getDocumentByHash(contentHash);
-    let versionNum = 1;
+    let doc = await this.db.getDocumentBySource(source, input.filename);
+    const isRetry = doc?.status === "FAILED";
+    let version: DocumentVersion;
 
     if (doc) {
       const activeVersion = await this.db.getActiveVersion(doc.id);
-      if (activeVersion && activeVersion.contentHash === contentHash) {
-        // Document with identical content already ingested
-        const existingJob = (await this.db.listIngestionJobs()).find(
-          (j) => j.documentVersionId === activeVersion.id
-        );
+      if (activeVersion?.contentHash === contentHash && doc.status === "INDEXED") {
+        const existingJob = (await this.db.listIngestionJobs()).find((item) => item.documentVersionId === activeVersion.id && item.status === "COMPLETED");
         return {
           document: doc,
           version: activeVersion,
-          job: existingJob || {
-            id: `job-${activeVersion.id}`,
-            documentVersionId: activeVersion.id,
-            stage: "INDEX",
-            status: "COMPLETED",
-            progressPct: 100,
-            retryCount: 0,
-          },
+          duplicate: true,
+          job: existingJob || this.completedJob(activeVersion.id),
         };
       }
-      versionNum = (activeVersion?.version || 1) + 1;
+
+      if (activeVersion && activeVersion.contentHash !== contentHash) {
+        await this.db.archiveActiveVersions(doc.id);
+      }
+
+      doc = { ...doc, contentHash, mimeType: input.mimeType, sizeBytes: input.buffer.length, status: "QUEUED" };
+      await this.db.saveDocument(doc);
+      version = activeVersion?.contentHash === contentHash
+        ? activeVersion
+        : await this.createVersion(doc, contentHash, 1 + (activeVersion?.version || 0), input.buffer);
     } else {
+      const sourceKey = createHash("sha256").update(`${source}\u0000${input.filename}`).digest("hex");
       doc = await this.db.saveDocument({
-        id: `doc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        source: input.source || input.filename,
+        id: this.stableId("doc", sourceKey),
+        source,
         name: input.filename,
         mimeType: input.mimeType,
         sizeBytes: input.buffer.length,
         contentHash,
-        status: "PROCESSING",
+        status: "QUEUED",
         createdAt: new Date().toISOString(),
       });
+      version = await this.createVersion(doc, contentHash, 1, input.buffer);
     }
 
-    // 2. Create Document Version
-    const version: DocumentVersion = await this.db.saveDocumentVersion({
-      id: `ver-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      documentId: doc.id,
-      version: versionNum,
-      contentHash,
-      language: "en",
-      pages: Math.max(1, Math.ceil(rawText.length / 2500)),
-      isActive: true,
-      createdAt: new Date().toISOString(),
-    });
+    doc = { ...doc, currentVersionId: version.id };
+    await this.db.saveDocument(doc);
 
     const job: IngestionJob = await this.db.saveIngestionJob({
-      id: `job-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      id: this.stableId("job", `${version.id}:${contentHash}:${Date.now()}`),
       documentVersionId: version.id,
       stage: "EXTRACT",
-      status: "RUNNING",
-      progressPct: 10,
-      retryCount: 0,
-      startedAt: new Date().toISOString(),
+      status: "QUEUED",
+      progressPct: 0,
+      retryCount: isRetry ? 1 : 0,
     });
 
     try {
-      // Stage 1: Extract
-      await this.db.updateIngestionJob({ id: job.id, stage: "EXTRACT", progressPct: 20 });
-      const extractedContent = this.extractStage(input.filename, rawText);
+      await this.db.updateIngestionJob({ id: job.id, status: "RUNNING", startedAt: new Date().toISOString() });
+      doc.status = "PROCESSING";
+      await this.db.saveDocument(doc);
 
-      // Stage 2: Clean
-      await this.db.updateIngestionJob({ id: job.id, stage: "CLEAN", progressPct: 40 });
-      const cleanedContent = this.cleanStage(extractedContent);
-
-      // Stage 3: Structure-Aware Chunking (ING-003)
-      await this.db.updateIngestionJob({ id: job.id, stage: "CHUNK", progressPct: 60 });
-      const chunks = this.chunkStage(cleanedContent, version.id, doc.name);
+      const extracted = await this.runStage(job, "EXTRACT", () => this.extractors.extract(input.filename, input.mimeType, input.buffer));
+      version = { ...version, pages: extracted.pages.length };
+      await this.db.saveDocumentVersion(version);
+      const cleaned = await this.runStage(job, "CLEAN", () => this.cleaner.clean(extracted));
+      const chunks = await this.runStage(job, "CHUNK", () => this.chunkStage(cleaned.pages, version.id, doc.name, contentHash));
       await this.db.saveChunks(chunks);
-
-      // Stage 4: Embed (ING-004)
-      await this.db.updateIngestionJob({ id: job.id, stage: "EMBED", progressPct: 80 });
-      const textsToEmbed = chunks.map((c) => c.text);
-      const embeddings = await this.aiProvider.generateBatchEmbeddings(textsToEmbed);
-
-      // Stage 5: Index (ING-005)
-      await this.db.updateIngestionJob({ id: job.id, stage: "INDEX", progressPct: 95 });
-      const chunkEmbeddings = chunks.map((c, idx) => ({
-        id: `emb-${c.id}`,
-        chunkId: c.id,
-        model: embeddings[idx].model,
-        dimension: embeddings[idx].dimension,
-        vector: embeddings[idx].embedding,
-        createdAt: new Date().toISOString(),
-      }));
-
-      await this.vectorStore.saveBatchEmbeddings(chunkEmbeddings);
-
-      // Complete
-      await this.db.updateIngestionJob({
-        id: job.id,
-        stage: "INDEX",
-        status: "COMPLETED",
-        progressPct: 100,
-        completedAt: new Date().toISOString(),
+      const embeddings = await this.runStage(job, "EMBED", () => this.aiProvider.generateBatchEmbeddings(chunks.map((chunk) => chunk.text)));
+      await this.runStage(job, "INDEX", async () => {
+        await this.vectorStore.saveBatchEmbeddings(chunks.map((chunk, index) => ({
+          id: this.stableId("emb", `${chunk.id}:${embeddings[index].model}`),
+          chunkId: chunk.id,
+          model: embeddings[index].model,
+          dimension: embeddings[index].dimension,
+          vector: embeddings[index].embedding,
+          createdAt: new Date().toISOString(),
+        })));
       });
 
-      doc.status = "COMPLETED";
+      const completedAt = new Date().toISOString();
+      await this.db.updateIngestionJob({ id: job.id, stage: "INDEX", status: "COMPLETED", progressPct: 100, completedAt });
+      doc.status = "INDEXED";
       doc.currentVersionId = version.id;
       await this.db.saveDocument(doc);
-
-      return { document: doc, version, job };
-    } catch (err: any) {
-      await this.db.updateIngestionJob({
-        id: job.id,
-        status: "FAILED",
-        errorCode: "PIPELINE_ERROR",
-        errorMessage: err.message,
-      });
+      return { document: doc, version, job: { ...job, stage: "INDEX", status: "COMPLETED", progressPct: 100, completedAt }, duplicate: false };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown ingestion error";
+      await this.db.updateIngestionJob({ id: job.id, status: "FAILED", errorCode: this.errorCode(error), errorMessage: message, completedAt: new Date().toISOString() });
       doc.status = "FAILED";
       await this.db.saveDocument(doc);
-      throw new IngestionFailedError(`Ingestion pipeline failed: ${err.message}`);
+      throw new IngestionFailedError(`Ingestion failed at ${job.stage}: ${message}`);
     }
   }
 
-  private extractStage(filename: string, text: string): string {
-    if (!text || text.trim().length === 0) {
-      throw new Error(`File ${filename} contains no extractable text`);
+  private async createVersion(document: Document, contentHash: string, versionNumber: number, buffer?: Buffer): Promise<DocumentVersion> {
+    // T1 Bilingual: Auto-detect document language from content
+    let language = "en";
+    if (buffer) {
+      const sampleText = buffer.toString("utf-8", 0, Math.min(buffer.length, 2000));
+      const arabicChars = (sampleText.match(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g) || []).length;
+      const latinChars = (sampleText.match(/[a-zA-Z]/g) || []).length;
+      const totalAlpha = arabicChars + latinChars;
+      if (totalAlpha > 0 && arabicChars / totalAlpha >= 0.5) {
+        language = "ar";
+      }
     }
-    return text;
+    return this.db.saveDocumentVersion({
+      id: this.stableId("ver", `${document.id}:${contentHash}`),
+      documentId: document.id,
+      version: versionNumber,
+      contentHash,
+      language,
+      pages: 1,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+    });
   }
 
-  private cleanStage(text: string): string {
-    return text
-      .replace(/\r\n/g, "\n")
-      .replace(/[ \t]+/g, " ")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
+  private async runStage<T>(job: IngestionJob, stage: IngestionStage, action: () => Promise<T> | T): Promise<T> {
+    job.stage = stage;
+    job.progressPct = STAGE_PROGRESS[stage];
+    await this.db.updateIngestionJob({ id: job.id, stage, status: "RUNNING", progressPct: job.progressPct });
+    return action();
   }
 
-  private chunkStage(text: string, versionId: string, docName: string): Chunk[] {
-    const paragraphs = text.split(/\n\n+/);
+  private chunkStage(pages: Array<{ number: number; text: string }>, versionId: string, docName: string, sourceHash: string): Chunk[] {
     const chunks: Chunk[] = [];
-    let currentChunkText = "";
-    let currentSection = "General";
     let chunkIndex = 0;
-    let currentPage = 1;
-
-    for (const para of paragraphs) {
-      // Heading detection
-      if (para.startsWith("#") || /^[A-Z0-9\s.:-]{3,40}$/m.test(para.slice(0, 40))) {
-        currentSection = para.replace(/^#+\s*/, "").split("\n")[0].trim();
-      }
-
-      if ((currentChunkText + "\n\n" + para).length > 800 && currentChunkText.length > 0) {
-        // Stable chunk id
-        const chunkHash = createHash("md5").update(`${versionId}:${chunkIndex}:${currentChunkText}`).digest("hex");
-        chunks.push({
-          id: `chk-${chunkHash.slice(0, 16)}`,
-          documentVersionId: versionId,
-          chunkIndex,
-          section: currentSection,
-          page: currentPage,
-          clause: `Section ${currentSection.slice(0, 15)}`,
-          text: currentChunkText.trim(),
-          tokenCount: Math.ceil(currentChunkText.length / 4),
-          metadata: {
-            documentName: docName,
-            section: currentSection,
-            page: currentPage,
-          },
-          createdAt: new Date().toISOString(),
-        });
-        chunkIndex++;
-        if (chunkIndex % 3 === 0) currentPage++;
-        currentChunkText = para;
-      } else {
-        currentChunkText = currentChunkText ? `${currentChunkText}\n\n${para}` : para;
-      }
-    }
-
-    if (currentChunkText.trim().length > 0) {
-      const chunkHash = createHash("md5").update(`${versionId}:${chunkIndex}:${currentChunkText}`).digest("hex");
+    let currentSection = "General";
+    const flush = (text: string, page: number) => {
+      const normalized = text.trim();
+      if (!normalized) return;
+      const id = this.stableId("chk", `${sourceHash}:${chunkIndex}`);
       chunks.push({
-        id: `chk-${chunkHash.slice(0, 16)}`,
+        id,
         documentVersionId: versionId,
         chunkIndex,
         section: currentSection,
-        page: currentPage,
-        clause: `Section ${currentSection.slice(0, 15)}`,
-        text: currentChunkText.trim(),
-        tokenCount: Math.ceil(currentChunkText.length / 4),
-        metadata: {
-          documentName: docName,
-          section: currentSection,
-          page: currentPage,
-        },
+        page,
+        clause: currentSection,
+        text: normalized,
+        tokenCount: Math.ceil(normalized.length / 4),
+        metadata: { documentName: docName, sourceHash, section: currentSection, page, versionId },
         createdAt: new Date().toISOString(),
       });
-    }
+      chunkIndex++;
+    };
 
+    for (const page of pages) {
+      let buffer = "";
+      for (const paragraph of page.text.split(/\n\s*\n+/).map((item) => item.trim()).filter(Boolean)) {
+        const heading = paragraph.split("\n")[0];
+        if (/^#{1,6}\s+/.test(heading) || /^[A-Z][A-Z0-9 ,.:;()/-]{3,100}$/.test(heading)) {
+          currentSection = heading.replace(/^#{1,6}\s*/, "").trim();
+        }
+        // Never split a paragraph: citation-critical sentences retain context.
+        if (buffer && buffer.length + paragraph.length + 2 > 900) {
+          flush(buffer, page.number);
+          buffer = paragraph;
+        } else {
+          buffer = buffer ? `${buffer}\n\n${paragraph}` : paragraph;
+        }
+      }
+      flush(buffer, page.number);
+    }
     return chunks;
+  }
+
+  private stableId(prefix: string, value: string): string {
+    const hex = createHash("sha256").update(`${prefix}:${value}`).digest("hex");
+    const uuid = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${((parseInt(hex.slice(16, 18), 16) & 0x3f) | 0x80).toString(16)}${hex.slice(18, 20)}-${hex.slice(20, 32)}`;
+    return uuid;
+  }
+
+  private completedJob(versionId: string): IngestionJob {
+    return { id: this.stableId("job", versionId), documentVersionId: versionId, stage: "INDEX", status: "COMPLETED", progressPct: 100, retryCount: 0 };
+  }
+
+  private errorCode(error: unknown): string {
+    if (error && typeof error === "object" && "code" in error && typeof (error as { code?: unknown }).code === "string") {
+      return (error as { code: string }).code;
+    }
+    return "PIPELINE_ERROR";
   }
 }

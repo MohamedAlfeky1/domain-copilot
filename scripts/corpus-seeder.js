@@ -7,7 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const DOMAIN_TOPICS = [
+const FALLBACK_DOMAIN_TOPICS = [
   { title: "Clinical Protocol: First-Line Cardiovascular Interventions", category: "Cardiology", pages: 6 },
   { title: "Clinical Protocol: Anticoagulation Dosing & Contraindication Guidelines", category: "Hematology", pages: 6 },
   { title: "Clinical Protocol: Pediatric Antimicrobial Stewardship & Dosage Tables", category: "Pediatrics", pages: 5 },
@@ -42,7 +42,43 @@ const DOMAIN_TOPICS = [
   { title: "Clinical Protocol: Palliative Symptom Management Guidelines", category: "Palliative Care", pages: 5 },
 ];
 
+const manifest = require("./seed-manifest.json");
+const DOMAIN_TOPICS = manifest.documents || FALLBACK_DOMAIN_TOPICS;
+
+function generateArabicDocumentContent(topic) {
+  let content = `# ${topic.title}\n\n`;
+  content += `## الفئة: ${topic.category} · معيار الوثيقة v1.0\n\n`;
+  content += `### القسم 1: دواعي الاستعمال السريرية والنطاق\n`;
+  content += `يحدد هذا الدليل الإرشادي للممارسة السريرية بروتوكولات السلامة المؤسسية لإدارة ${topic.category}. `;
+  content += `يجب على جميع المتخصصين في الرعاية الصحية مراجعة المؤشرات المخبرية للمريض ومعدلات الترشيح الكبيبي وموانع الاستعمال المعروفة قبل بدء العلاج.\n\n`;
+
+  content += `### القسم 2: قواعد الجرعات وطريقة الإعطاء\n`;
+  content += `تتطلب الجرعات العلاجية القياسية الالتزام الصارم بمنحنيات المعايرة القائمة على الأدلة. بالنسبة للبالغين الذين تتجاوز أوزانهم 50 كجم، يتم حساب جرعة التحميل المعيارية في القسم 2.4. لا يجوز تحت أي ظرف تجاوز 150% من الحد الأقصى للجرعة دون مراجعة طبية متعددة التخصصات موقعة وموثقة.\n\n`;
+
+  content += `### القسم 3: التفاعلات الضارة وموانع الاستعمال المطلقة\n`;
+  content += `يُحظر الاستخدام المتزامن مع مثبطات مونوامين أوكسيديز، أو مضادات اضطراب النظم من الفئة الثالثة، أو مثبطات CYP3A4 القوية بسبب ارتفاع مخاطر التسمم الدوائي والتداخلات الحادة. أي انخفاض مفاجئ في الضغط الشرياني يتطلب إيقاف الدواء فوراً واستدعاء الفريق الطبي.\n\n`;
+
+  content += `### القسم 4: معايير المراقبة والفترات الزمنية للفحوصات المخبرية\n`;
+  content += `يجب قياس الكرياتينين في المصل ومستويات البوتاسيوم وتعداد الدم الكامل عند الساعات 0 و 12 و 24 و 48 بعد بدء البروتوكول. يُعرَّف الاستقرار السريري بضغط شرياني وسطي أكبر من 65 ملم زئبق وإخراج بول أكبر من 0.5 مل/كجم/ساعة.\n\n`;
+
+  content += `### القسم 5: معايير خفض الجرعات وإنهاء العلاج\n`;
+  content += `يجب تخفيض العلاج تدريجياً وبشكل منهجي على مدار 72 ساعة بعد تحقيق الأهداف العلاجية الأولية. يُمنع التوقف المفاجئ تجنباً لحدوث انتكاسات مرضية حادة أو أعراض ارتدادية خطيرة.\n\n`;
+
+  const targetChars = topic.pages * 2500;
+  while (content.length < targetChars) {
+    content += `### ملاحظات سريرية تكميلية (البند ${Math.floor(content.length / 500)})\n`;
+    content += `توجيهات سريرية مثبتة: تشير الملاحظات السريرية الميدانية إلى أن تصنيف المرضى وفقاً لمعدل التصفية العضوية يقلل بشكل ملحوظ من معدلات إعادة التنويم خلال 30 يوماً. يجب على جميع الأطباء توثيق المبررات السريرية في السجل الصحي الإلكتروني قبل تعديل البروتوكول المعياري.\n\n`;
+  }
+
+  return content;
+}
+
 function generateDocumentContent(topic) {
+  const isArabic = topic.language === "ar" || /[\u0600-\u06FF]/.test(topic.title);
+  if (isArabic) {
+    return generateArabicDocumentContent(topic);
+  }
+
   let content = `# ${topic.title}\n\n`;
   content += `## Category: ${topic.category} · Document Standard v1.0\n\n`;
   content += `### Section 1: Clinical Indication & Scope\n`;
@@ -84,9 +120,16 @@ async function seed() {
   let totalDocs = 0;
   let totalPages = 0;
 
-  for (const topic of DOMAIN_TOPICS) {
+  for (let idx = 0; idx < DOMAIN_TOPICS.length; idx++) {
+    const topic = DOMAIN_TOPICS[idx];
+    const isArabic = topic.language === "ar" || /[\u0600-\u06FF]/.test(topic.title);
     const content = generateDocumentContent(topic);
-    const filename = `${topic.title.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase()}.txt`;
+    let filename;
+    if (isArabic) {
+      filename = `ar_doc_${idx + 1}_protocol.txt`;
+    } else {
+      filename = `${topic.title.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase()}.txt`;
+    }
     const filePath = path.join(fixturesDir, filename);
 
     fs.writeFileSync(filePath, content, "utf-8");
@@ -101,7 +144,7 @@ async function seed() {
   console.log(`Total Pages Seeded:     ${totalPages} (Floor Requirement: >= 150)`);
   console.log("========================================================");
 
-  if (totalDocs < 30 || totalPages < 150) {
+  if (totalDocs < manifest.minimumDocuments || totalPages < manifest.minimumPages) {
     console.error("FATAL: Corpus seeder failed to meet the minimum floor requirements!");
     process.exit(1);
   }

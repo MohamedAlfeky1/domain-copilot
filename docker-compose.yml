@@ -34,8 +34,8 @@ services:
     environment:
       PORT: 3000
       NODE_ENV: production
-      ASSIGNED_DOMAIN: ${ASSIGNED_DOMAIN:-D1_HEALTHCARE}
-      ASSIGNED_TWIST: ${ASSIGNED_TWIST:-T1_SAFETY_GUARDRAIL}
+      ASSIGNED_DOMAIN: ${ASSIGNED_DOMAIN:-D0_HEALTHCARE}
+      ASSIGNED_TWIST: ${ASSIGNED_TWIST:-T1_BILINGUAL_AR_EN}
       AI_PROVIDER: ${AI_PROVIDER:-openai}
       AI_MODEL: ${AI_MODEL:-gpt-4o}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
@@ -43,6 +43,10 @@ services:
       DATABASE_URL: postgresql://postgres:postgrespassword@postgres:5432/domain_copilot
       USE_EMBEDDED_DB: "false"
       JWT_SECRET: ${JWT_SECRET:-domain-copilot-assessment-secure-jwt-key-32-chars}
+      INGESTION_STAGING_DIR: /data/staging
+    volumes:
+      - ingestion_staging:/data
 
 volumes:
   pgdata:
+  ingestion_staging:

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { container } from "@/core/application/container";
+import { DomainError, UnsupportedFileTypeError, ValidationError } from "@/core/domain/errors";
+import { createHash } from "crypto";
+import { localStagingStorage } from "@/infrastructure/storage/local-staging.adapter";
 
 export const runtime = "nodejs";
 
@@ -7,8 +10,10 @@ export async function GET() {
   try {
     const docs = await container.db.listDocuments();
     const totalChunks = await container.db.countTotalChunks();
+    const jobs = await container.db.listIngestionJobs();
     return NextResponse.json({
       documents: docs,
+      jobs,
       totalCount: docs.length,
       totalChunksIndexed: totalChunks,
     });
@@ -33,17 +38,7 @@ export async function POST(req: NextRequest) {
       }
 
       filename = file.name;
-      mimeType = file.type || "application/octet-stream";
-
-      // File type check
-      const validExtensions = [".pdf", ".docx", ".txt", ".md"];
-      const hasValidExt = validExtensions.some((ext) => filename.toLowerCase().endsWith(ext));
-      if (!hasValidExt && !mimeType.includes("text") && !mimeType.includes("pdf")) {
-        return NextResponse.json(
-          { error: `Unsupported file type: ${filename}. Supported: PDF, DOCX, TXT, MD.` },
-          { status: 400 }
-        );
-      }
+      mimeType = file.type;
 
       const bytes = await file.arrayBuffer();
       buffer = Buffer.from(bytes);
@@ -58,10 +53,27 @@ export async function POST(req: NextRequest) {
       buffer = Buffer.from(body.content, "utf-8");
     }
 
+    const extension = filename.toLowerCase().match(/\.(pdf|docx|txt)$/)?.[0];
+    const allowedMime: Record<string, string> = {
+      ".pdf": "application/pdf",
+      ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ".txt": "text/plain",
+    };
+    if (!extension || !allowedMime[extension]) {
+      throw new UnsupportedFileTypeError(`Unsupported extension for "${filename}". Allowed extensions: .pdf, .docx, .txt.`);
+    }
+    const expectedMime = allowedMime[extension];
+    if (mimeType && mimeType !== expectedMime) {
+      throw new ValidationError(`MIME type mismatch for "${filename}": expected ${expectedMime}, received ${mimeType}.`);
+    }
+    mimeType = expectedMime;
+
     // Size limit: 25MB (ING-001)
     if (buffer.length > 25 * 1024 * 1024) {
       return NextResponse.json({ error: "File exceeds 25MB maximum size limit" }, { status: 400 });
     }
+
+    await localStagingStorage.stage(createHash("sha256").update(buffer).digest("hex"), buffer);
 
     const result = await container.ingestionService.ingestDocument({
       filename,
@@ -75,11 +87,13 @@ export async function POST(req: NextRequest) {
         versionId: result.version.id,
         jobId: result.job.id,
         status: result.document.status,
+        duplicate: result.duplicate,
         name: result.document.name,
       },
       { status: 201 }
     );
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const status = error instanceof DomainError ? error.httpStatus : 500;
+    return NextResponse.json({ error: error.message || "Document ingestion failed", code: error.code || "INGESTION_ERROR" }, { status });
   }
 }

@@ -1,5 +1,5 @@
 /**
- * DOMAIN COPILOT - HUMAN-IN-THE-LOOP (HITL) APPROVAL SERVICE (EPIC 04)
+ * DOMAIN COPILOT - HUMAN-IN-THE-LOOP (HITL) APPROVAL SERVICE
  * Manages consequential action approvals, edit-and-approve, rejection, and audit timeline.
  */
 

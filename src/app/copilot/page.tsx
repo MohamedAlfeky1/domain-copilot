@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Send,
   Square,
@@ -15,6 +15,9 @@ import {
   Copy,
   Check,
   Cpu,
+  AlertTriangle,
+  Clock,
+  ArrowRight,
 } from "lucide-react";
 
 interface Citation {
@@ -31,7 +34,14 @@ interface Citation {
 
 interface StepProgress {
   agent: string;
-  status: "pending" | "running" | "completed";
+  status: "pending" | "running" | "completed" | "approval_pending";
+}
+
+interface ApprovalInfo {
+  approvalId: string;
+  riskLevel: string;
+  proposedAction: string;
+  riskFlags: Array<{ riskType: string; severity: string; detail: string }>;
 }
 
 export default function CopilotPage() {
@@ -45,11 +55,25 @@ export default function CopilotPage() {
   const [refusalMessage, setRefusalMessage] = useState("");
   const [copied, setCopied] = useState(false);
 
+  // HITL approval state
+  const [pendingApproval, setPendingApproval] = useState<ApprovalInfo | null>(null);
+  const [isAwaitingApproval, setIsAwaitingApproval] = useState(false);
+
+  // Mandatory Twist state (TW-005)
+  const [twistEvaluation, setTwistEvaluation] = useState<{
+    isPermitted: boolean;
+    computedRiskIndex: number;
+    threshold: number;
+    enforcedPolicy: string;
+    violations: string[];
+  } | null>(null);
+
   // Workflow progress steps
   const [steps, setSteps] = useState<StepProgress[]>([
-    { agent: "Retrieval Engine (Dense + Keyword RRF)", status: "pending" },
+    { agent: "Retrieval Engine (Cross-Lingual AR+EN)", status: "pending" },
     { agent: "Clinical Evidence Extractor", status: "pending" },
     { agent: "Contraindication & Safety Auditor", status: "pending" },
+    { agent: "Bilingual Context & Policy Guard", status: "pending" },
     { agent: "Therapeutic Protocol Drafter (gpt-4o)", status: "pending" },
   ]);
 
@@ -64,13 +88,17 @@ export default function CopilotPage() {
     setCitations([]);
     setIsRefused(false);
     setRefusalMessage("");
+    setPendingApproval(null);
+    setIsAwaitingApproval(false);
     setSelectedCitation(null);
+    setTwistEvaluation(null);
 
     // Reset steps
     setSteps([
-      { agent: "Retrieval Engine (Dense + Keyword RRF)", status: "running" },
+      { agent: "Retrieval Engine (Cross-Lingual AR+EN)", status: "running" },
       { agent: "Clinical Evidence Extractor", status: "pending" },
       { agent: "Contraindication & Safety Auditor", status: "pending" },
+      { agent: "Bilingual Context & Policy Guard", status: "pending" },
       { agent: "Therapeutic Protocol Drafter (gpt-4o)", status: "pending" },
     ]);
 
@@ -80,6 +108,11 @@ export default function CopilotPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query }),
       });
+
+      if (!initRes.ok) {
+        const errData = await initRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Failed to initiate query (${initRes.status})`);
+      }
 
       const { runId } = await initRes.json();
       setCurrentRunId(runId);
@@ -91,14 +124,24 @@ export default function CopilotPage() {
       sse.addEventListener("step_start", (evt: any) => {
         const data = JSON.parse(evt.data);
         setSteps((prev) =>
-          prev.map((s) => (s.agent.includes(data.agent) ? { ...s, status: "running" } : s))
+          prev.map((s) => {
+            const match =
+              s.agent.toLowerCase().includes(data.agent.toLowerCase()) ||
+              data.agent.toLowerCase().includes(s.agent.toLowerCase());
+            return match ? { ...s, status: "running" } : s;
+          })
         );
       });
 
       sse.addEventListener("step_complete", (evt: any) => {
         const data = JSON.parse(evt.data);
         setSteps((prev) =>
-          prev.map((s) => (s.agent.includes(data.agent) ? { ...s, status: "completed" } : s))
+          prev.map((s) => {
+            const match =
+              s.agent.toLowerCase().includes(data.agent.toLowerCase()) ||
+              data.agent.toLowerCase().includes(s.agent.toLowerCase());
+            return match ? { ...s, status: "completed" } : s;
+          })
         );
       });
 
@@ -116,6 +159,47 @@ export default function CopilotPage() {
         const data = JSON.parse(evt.data);
         setIsRefused(true);
         setRefusalMessage(data.message);
+        setStreaming(false);
+        setSteps((prev) =>
+          prev.map((s, idx) =>
+            idx === 0
+              ? { ...s, status: "completed" }
+              : { ...s, status: "pending" }
+          )
+        );
+        sse.close();
+      });
+
+      // TW-005: Handle twist_evaluation event — live risk guard state
+      sse.addEventListener("twist_evaluation", (evt: any) => {
+        const data = JSON.parse(evt.data);
+        if (data.data) {
+          setTwistEvaluation(data.data);
+        }
+      });
+
+      // HITL-006: Handle approval_required event — workflow paused
+      sse.addEventListener("approval_required", (evt: any) => {
+        const data = JSON.parse(evt.data);
+        const approvalData = data.data || data;
+        setPendingApproval({
+          approvalId: approvalData.approvalId,
+          riskLevel: approvalData.riskLevel || "HIGH",
+          proposedAction: approvalData.proposedAction || "Action requires human review",
+          riskFlags: approvalData.riskFlags || [],
+        });
+        setIsAwaitingApproval(true);
+        setStreaming(false);
+
+        // Update progress rail to show approval gate
+        setSteps((prev) => [
+          ...prev.map((s) =>
+            s.status === "running" ? { ...s, status: "completed" as const } : s
+          ),
+          { agent: "HITL Approval Gate", status: "approval_pending" as const },
+        ]);
+
+        sse.close();
       });
 
       sse.addEventListener("done", () => {
@@ -124,13 +208,35 @@ export default function CopilotPage() {
         sse.close();
       });
 
-      sse.addEventListener("error", () => {
+      sse.addEventListener("error", (evt: any) => {
         setStreaming(false);
+        if (evt.data) {
+          try {
+            const data = JSON.parse(evt.data);
+            if (data.message) {
+              setStreamedText((prev) => prev || `Workflow notification: ${data.message}`);
+            }
+          } catch {}
+        }
+        setSteps((prev) =>
+          prev.map((s) => (s.status === "running" ? { ...s, status: "completed" } : s))
+        );
         sse.close();
       });
+
+      sse.onerror = () => {
+        setStreaming(false);
+        setSteps((prev) =>
+          prev.map((s) => (s.status === "running" ? { ...s, status: "completed" } : s))
+        );
+        sse.close();
+      };
     } catch (err: any) {
       alert(`Query failed: ${err.message}`);
       setStreaming(false);
+      setSteps((prev) =>
+        prev.map((s) => (s.status === "running" ? { ...s, status: "completed" } : s))
+      );
     }
   };
 
@@ -169,6 +275,19 @@ export default function CopilotPage() {
           </div>
 
           <div className="flex items-center gap-2 text-xs">
+            {twistEvaluation && (
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-mono text-[11px] ${
+                  twistEvaluation.isPermitted
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                    : "bg-rose-500/10 border-rose-500/30 text-rose-300"
+                }`}
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                TWIST GUARD: {twistEvaluation.isPermitted ? "PERMITTED" : "TRIPPED"} ({twistEvaluation.computedRiskIndex}/{twistEvaluation.threshold})
+              </span>
+            )}
+
             {isRefused ? (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-500/10 border border-rose-500/30 text-rose-300 font-mono text-[11px]">
                 <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
@@ -209,14 +328,84 @@ export default function CopilotPage() {
             <div className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs space-y-2">
               <div className="flex items-center gap-2 font-semibold text-rose-400">
                 <ShieldAlert className="w-4 h-4" />
-                <span>Low-Evidence Refusal Triggered (RET-004)</span>
+                <span>Low-Evidence Refusal Triggered</span>
               </div>
               <p className="leading-normal">{refusalMessage}</p>
             </div>
           )}
 
+          {/* Twist Guard Alert Banner (TW-005) */}
+          {twistEvaluation && !twistEvaluation.isPermitted && (
+            <div className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs space-y-2">
+              <div className="flex items-center justify-between font-semibold text-rose-400">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4" />
+                  <span>Mandatory Safety Guard Active: Risk Ceiling Exceeded</span>
+                </div>
+                <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-300">
+                  Risk Index: {twistEvaluation.computedRiskIndex} / Ceiling: {twistEvaluation.threshold}
+                </span>
+              </div>
+              <p className="text-[11px] text-rose-200/80 font-mono">
+                Enforced Policy: {twistEvaluation.enforcedPolicy}
+              </p>
+              {twistEvaluation.violations.length > 0 && (
+                <ul className="list-disc list-inside space-y-1 text-[11px] text-rose-300/90 font-mono">
+                  {twistEvaluation.violations.map((v, i) => (
+                    <li key={i}>{v}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* HITL Approval Banner */}
+          {isAwaitingApproval && pendingApproval && (
+            <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-3">
+              <div className="flex items-center gap-2 font-semibold text-amber-400">
+                <AlertTriangle className="w-4 h-4" />
+                <span>Workflow Paused: Human Approval Required</span>
+              </div>
+              <p className="leading-normal text-amber-200/80">{pendingApproval.proposedAction}</p>
+
+              {pendingApproval.riskFlags.length > 0 && (
+                <div className="space-y-1.5">
+                  {pendingApproval.riskFlags.map((flag, i) => (
+                    <div
+                      key={i}
+                      className={`px-2.5 py-1.5 rounded text-[11px] font-mono border ${
+                        flag.severity === "CRITICAL"
+                          ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
+                          : flag.severity === "HIGH"
+                          ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                          : "bg-sky-500/10 border-sky-500/30 text-sky-300"
+                      }`}
+                    >
+                      <span className="font-bold">{flag.severity}:</span> {flag.riskType} — {flag.detail}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 pt-1">
+                <a
+                  href="/reviews"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold shadow-lg shadow-amber-600/20 transition-all"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  Review in HITL Queue
+                  <ArrowRight className="w-3 h-3" />
+                </a>
+                <span className="text-[10px] font-mono text-amber-400/60 flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  Approval ID: {pendingApproval.approvalId}
+                </span>
+              </div>
+            </div>
+          )}
+
           {streamedText && (
-            <div className="prose prose-invert max-w-none text-slate-200 whitespace-pre-wrap">
+            <div className="prose prose-invert max-w-none text-slate-200 whitespace-pre-wrap" dir="auto">
               {streamedText}
             </div>
           )}
@@ -253,7 +442,7 @@ export default function CopilotPage() {
             </span>
             {streaming && <span className="text-sky-400 animate-pulse">Running...</span>}
           </div>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="flex flex-wrap gap-2">
             {steps.map((step, idx) => (
               <div
                 key={step.agent}
@@ -262,11 +451,14 @@ export default function CopilotPage() {
                     ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
                     : step.status === "running"
                     ? "bg-sky-500/10 border-sky-500/30 text-sky-300 animate-pulse"
+                    : step.status === "approval_pending"
+                    ? "bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse"
                     : "bg-slate-900 border-slate-800 text-slate-500"
                 }`}
               >
-                <span className="font-bold">0{idx + 1}</span>
+                <span className="font-bold">{String(idx + 1).padStart(2, "0")}</span>
                 <span className="truncate">{step.agent}</span>
+                {step.status === "approval_pending" && <Clock className="w-3 h-3 text-amber-400" />}
               </div>
             ))}
           </div>
@@ -284,8 +476,9 @@ export default function CopilotPage() {
                   handleSubmit();
                 }
               }}
+              dir="auto"
               rows={2}
-              placeholder="Ask a question grounded in the clinical protocol corpus (Enter to run, Shift+Enter for newline)..."
+              placeholder="Ask a question grounded in the clinical protocol corpus (English or Arabic)..."
               className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 resize-none font-sans"
             />
             {streaming ? (
@@ -344,7 +537,7 @@ export default function CopilotPage() {
 
             <div className="space-y-1">
               <p className="text-[11px] font-mono text-slate-400">Verbatim Stored Chunk:</p>
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-[11px] text-slate-300 leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap">
+              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-[11px] text-slate-300 leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap" dir="auto">
                 {selectedCitation.excerpt}
               </div>
             </div>

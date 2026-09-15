@@ -20,20 +20,49 @@ const aiProvider = new OpenAIProviderAdapter(
   process.env.EMBEDDING_MODEL || "text-embedding-3-small"
 );
 
-// 2. Application Services
-const ingestionService = new IngestionService(dbAdapter, dbAdapter, aiProvider);
-const retrievalService = new HybridRetrievalService(dbAdapter, aiProvider, dbAdapter);
-const orchestratorService = new MultiAgentOrchestrator(dbAdapter, aiProvider, retrievalService, toolRegistry);
-const approvalService = new ApprovalService(dbAdapter);
+export interface AppContainer {
+  db: typeof dbAdapter;
+  vectorStore: typeof dbAdapter;
+  aiProvider: OpenAIProviderAdapter;
+  ingestionService: IngestionService;
+  retrievalService: HybridRetrievalService;
+  orchestratorService: MultiAgentOrchestrator;
+  approvalService: ApprovalService;
+  toolRegistry: typeof toolRegistry;
+  twistAdapter: typeof twistAdapter;
+}
 
-export const container = {
-  db: dbAdapter,
-  vectorStore: dbAdapter,
-  aiProvider,
-  ingestionService,
-  retrievalService,
-  orchestratorService,
-  approvalService,
-  toolRegistry,
-  twistAdapter,
+export const buildContainer = (): AppContainer => {
+  const currentAiProvider = new OpenAIProviderAdapter(
+    process.env.OPENAI_API_KEY,
+    process.env.AI_MODEL || "gpt-4o",
+    process.env.EMBEDDING_MODEL || "text-embedding-3-small"
+  );
+  toolRegistry.setTwistPort(twistAdapter);
+  const ingestionService = new IngestionService(dbAdapter, dbAdapter, currentAiProvider);
+  const retrievalService = new HybridRetrievalService(dbAdapter, currentAiProvider, dbAdapter);
+  const approvalService = new ApprovalService(dbAdapter);
+  const orchestratorService = new MultiAgentOrchestrator(
+    dbAdapter,
+    currentAiProvider,
+    retrievalService,
+    toolRegistry,
+    approvalService,
+    twistAdapter
+  );
+
+  return {
+    db: dbAdapter,
+    vectorStore: dbAdapter,
+    aiProvider: currentAiProvider,
+    ingestionService,
+    retrievalService,
+    orchestratorService,
+    approvalService,
+    toolRegistry,
+    twistAdapter,
+  };
 };
+
+export const container: AppContainer = buildContainer();
+

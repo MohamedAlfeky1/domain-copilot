@@ -19,6 +19,15 @@ import {
   EvaluationResult,
 } from "../../domain/types";
 
+export interface DatabaseReadinessResult {
+  isReady: boolean;
+  database: "CONNECTED" | "DISCONNECTED";
+  pgvector: "READY" | "UNAVAILABLE";
+  totalChunks: number;
+  latencyMs: number;
+  details?: Record<string, unknown>;
+}
+
 export interface IDatabasePort {
   // Users
   getUserByEmail(email: string): Promise<User | null>;
@@ -29,9 +38,11 @@ export interface IDatabasePort {
   saveDocument(doc: Document): Promise<Document>;
   getDocumentById(id: string): Promise<Document | null>;
   getDocumentByHash(contentHash: string): Promise<Document | null>;
+  getDocumentBySource(source: string, name: string): Promise<Document | null>;
   listDocuments(): Promise<Document[]>;
   saveDocumentVersion(version: DocumentVersion): Promise<DocumentVersion>;
   getActiveVersion(documentId: string): Promise<DocumentVersion | null>;
+  archiveActiveVersions(documentId: string): Promise<void>;
 
   // Chunks
   saveChunks(chunks: Chunk[]): Promise<void>;
@@ -41,6 +52,7 @@ export interface IDatabasePort {
 
   // Ingestion Jobs
   saveIngestionJob(job: IngestionJob): Promise<IngestionJob>;
+  getIngestionJob(id: string): Promise<IngestionJob | null>;
   updateIngestionJob(job: Partial<IngestionJob> & { id: string }): Promise<void>;
   listIngestionJobs(): Promise<IngestionJob[]>;
 
@@ -75,4 +87,7 @@ export interface IDatabasePort {
   listEvaluationCases(): Promise<EvaluationCase[]>;
   saveEvaluationResult(result: EvaluationResult): Promise<void>;
   listEvaluationResults(): Promise<EvaluationResult[]>;
+
+  // Readiness & Health Check (OBS-006)
+  checkReadiness(): Promise<DatabaseReadinessResult>;
 }
