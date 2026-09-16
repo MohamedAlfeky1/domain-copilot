@@ -5,7 +5,10 @@
  */
 
 import { dbAdapter } from "../../infrastructure/db/database.adapter";
-import { OpenAIProviderAdapter } from "../../infrastructure/ai/openai.adapter";
+import { resolveAIProvider, resolveEmbeddingProvider } from "../../infrastructure/ai/ai-provider.factory";
+import { TesseractOcrAdapter } from "../../infrastructure/ocr/tesseract-ocr.adapter";
+import { IAIProviderPort } from "./ports/ai-provider.port";
+import { IOCRPort } from "./ports/ocr.port";
 import { IngestionService } from "./ingestion/ingestion.service";
 import { HybridRetrievalService } from "./retrieval/retrieval.service";
 import { toolRegistry } from "./agents/tool-registry";
@@ -13,17 +16,12 @@ import { MultiAgentOrchestrator } from "./agents/orchestrator.service";
 import { ApprovalService } from "./approvals/approval.service";
 import { twistAdapter } from "../../infrastructure/twist/twist.adapter";
 
-// 1. Infrastructure Providers
-const aiProvider = new OpenAIProviderAdapter(
-  process.env.OPENAI_API_KEY,
-  process.env.AI_MODEL || "gpt-4o",
-  process.env.EMBEDDING_MODEL || "text-embedding-3-small"
-);
-
 export interface AppContainer {
   db: typeof dbAdapter;
   vectorStore: typeof dbAdapter;
-  aiProvider: OpenAIProviderAdapter;
+  aiProvider: IAIProviderPort;
+  embeddingProvider: IAIProviderPort;
+  ocrPort: IOCRPort;
   ingestionService: IngestionService;
   retrievalService: HybridRetrievalService;
   orchestratorService: MultiAgentOrchestrator;
@@ -33,14 +31,12 @@ export interface AppContainer {
 }
 
 export const buildContainer = (): AppContainer => {
-  const currentAiProvider = new OpenAIProviderAdapter(
-    process.env.OPENAI_API_KEY,
-    process.env.AI_MODEL || "gpt-4o",
-    process.env.EMBEDDING_MODEL || "text-embedding-3-small"
-  );
+  const currentAiProvider = resolveAIProvider();
+  const currentEmbeddingProvider = resolveEmbeddingProvider();
+  const ocrPort = new TesseractOcrAdapter();
   toolRegistry.setTwistPort(twistAdapter);
-  const ingestionService = new IngestionService(dbAdapter, dbAdapter, currentAiProvider);
-  const retrievalService = new HybridRetrievalService(dbAdapter, currentAiProvider, dbAdapter);
+  const ingestionService = new IngestionService(dbAdapter, dbAdapter, currentEmbeddingProvider, ocrPort);
+  const retrievalService = new HybridRetrievalService(dbAdapter, currentEmbeddingProvider, dbAdapter);
   const approvalService = new ApprovalService(dbAdapter);
   const orchestratorService = new MultiAgentOrchestrator(
     dbAdapter,
@@ -55,6 +51,8 @@ export const buildContainer = (): AppContainer => {
     db: dbAdapter,
     vectorStore: dbAdapter,
     aiProvider: currentAiProvider,
+    embeddingProvider: currentEmbeddingProvider,
+    ocrPort,
     ingestionService,
     retrievalService,
     orchestratorService,

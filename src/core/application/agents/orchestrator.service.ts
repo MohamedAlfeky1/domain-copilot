@@ -16,7 +16,7 @@
  */
 
 import { IDatabasePort } from "../ports/database.port";
-import { IAIProviderPort, CompletionMessage } from "../ports/ai-provider.port";
+import { IAIProviderPort, CompletionMessage, CompletionResult } from "../ports/ai-provider.port";
 import { HybridRetrievalService, RetrievalResult } from "../retrieval/retrieval.service";
 import { RetrievalScopeFilter } from "../ports/vector-store.port";
 import { ToolRegistry } from "./tool-registry";
@@ -340,10 +340,11 @@ export class MultiAgentOrchestrator {
     });
 
     let finalSynthesis = "";
+    let streamRes: CompletionResult | undefined;
     const streamTimeout = createStepTimeout(this.STEP_TIMEOUT_MS, specialists[2]);
 
     try {
-      const streamRes = await Promise.race([
+      streamRes = await Promise.race([
         this.aiProvider.streamCompletion(
           [
             { role: "system", content: s3Prompt },
@@ -389,8 +390,8 @@ export class MultiAgentOrchestrator {
       id: `usage-${runId}`,
       runId,
       correlationId,
-      provider: "openai",
-      model: "gpt-4o",
+      provider: this.aiProvider.providerName,
+      model: streamRes?.model || process.env.AI_MODEL || "gpt-4o",
       callType: "COMPLETION",
       promptTokens: totalPromptTokens,
       completionTokens: totalCompletionTokens,
