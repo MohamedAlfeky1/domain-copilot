@@ -6,7 +6,7 @@ const nextConfig = {
     JWT_SECRET: process.env.JWT_SECRET,
   },
   experimental: {
-    serverComponentsExternalPackages: ["@electric-sql/pglite", "pg"],
+    serverComponentsExternalPackages: ["@electric-sql/pglite", "pg", "pdfjs-dist"],
     cpus: 1,
     workerThreads: false,
   },

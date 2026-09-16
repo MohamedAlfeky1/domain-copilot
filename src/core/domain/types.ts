@@ -39,15 +39,18 @@ export interface DocumentVersion {
   pages: number;
   isActive: boolean;
   createdAt: string;
+  extractionMethod?: "normal" | "ocr";
 }
 
 export interface ChunkMetadata {
   documentName?: string;
   source?: string;
+  sourceHash?: string;
   section?: string;
   page?: number;
   clause?: string;
   headings?: string[];
+  extractionMethod?: "normal" | "ocr";
   [key: string]: unknown;
 }
 

@@ -18,6 +18,11 @@ export class ValidationError extends DomainError {
   readonly httpStatus = 400;
 }
 
+export class ExtractionQualityError extends DomainError {
+  readonly code = "EXTRACTION_QUALITY_ERROR";
+  readonly httpStatus = 400;
+}
+
 export class IncompatibleFilterScopeError extends DomainError {
   readonly code = "INCOMPATIBLE_FILTER_SCOPE";
   readonly httpStatus = 400;
@@ -71,6 +76,12 @@ export class ApprovalRequiredError extends DomainError {
 export class ProviderFailureError extends DomainError {
   readonly code = "AI_PROVIDER_FAILURE";
   readonly httpStatus = 502;
+  readonly provider?: string;
+
+  constructor(message: string, provider?: string) {
+    super(message);
+    this.provider = provider;
+  }
 }
 
 export class StepTimeoutError extends DomainError {

@@ -30,6 +30,7 @@ export interface CompletionResult {
   completionTokens: number;
   totalTokens: number;
   model: string;
+  provider?: string;
 }
 
 export interface StreamEvent {
@@ -39,7 +40,21 @@ export interface StreamEvent {
   totalTokens?: number;
 }
 
-export interface IAIProviderPort {
+export interface IEmbeddingProviderPort {
+  readonly providerName: string;
+
+  generateEmbedding(
+    text: string,
+    options?: { model?: string; taskType?: "RETRIEVAL_QUERY" | "RETRIEVAL_DOCUMENT" | string }
+  ): Promise<{ embedding: number[]; dimension: number; model: string }>;
+
+  generateBatchEmbeddings(
+    texts: string[],
+    options?: { model?: string; taskType?: "RETRIEVAL_QUERY" | "RETRIEVAL_DOCUMENT" | string }
+  ): Promise<Array<{ embedding: number[]; dimension: number; model: string }>>;
+}
+
+export interface IAIProviderPort extends IEmbeddingProviderPort {
   readonly providerName: string;
 
   generateCompletion(
@@ -65,11 +80,11 @@ export interface IAIProviderPort {
 
   generateEmbedding(
     text: string,
-    options?: { model?: string }
+    options?: { model?: string; taskType?: "RETRIEVAL_QUERY" | "RETRIEVAL_DOCUMENT" | string }
   ): Promise<{ embedding: number[]; dimension: number; model: string }>;
 
   generateBatchEmbeddings(
     texts: string[],
-    options?: { model?: string }
+    options?: { model?: string; taskType?: "RETRIEVAL_QUERY" | "RETRIEVAL_DOCUMENT" | string }
   ): Promise<Array<{ embedding: number[]; dimension: number; model: string }>>;
 }
