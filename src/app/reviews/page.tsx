@@ -1,17 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import {
-  ShieldAlert,
-  CheckCircle2,
-  Edit3,
-  XCircle,
-  Clock,
-  User,
-  History,
-  AlertTriangle,
-  RefreshCw,
-} from "lucide-react";
+import { AppIcons } from "@/components/ui/icons";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -133,7 +123,7 @@ export default function ReviewsPage() {
           size="sm"
           className="self-start md:self-auto gap-1.5"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-primary" : ""}`} />
+          <AppIcons.refresh className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           Refresh Queue
         </Button>
       </Card>
@@ -151,7 +141,7 @@ export default function ReviewsPage() {
           <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
             {approvals.length === 0 ? (
               <div className="p-8 text-center text-muted-foreground text-xs">
-                <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-500 opacity-60" />
+                <AppIcons.success className="w-8 h-8 mx-auto mb-2 text-emerald-500 opacity-60" />
                 <p className="font-medium text-foreground">No actions pending review</p>
                 <p className="text-[11px] mt-1 text-muted-foreground">
                   Consequential actions triggered during copilot runs will appear here.
@@ -235,8 +225,7 @@ export default function ReviewsPage() {
             {/* Structured Payload Editor */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-mono text-foreground font-semibold flex items-center gap-1.5">
-                  <Edit3 className="w-3.5 h-3.5 text-primary" />
+                <label className="text-xs font-mono text-foreground font-semibold block">
                   Proposed Action Payload (Editable for Edit-and-Approve):
                 </label>
                 <textarea
@@ -266,7 +255,7 @@ export default function ReviewsPage() {
               {showRejectModal && (
                 <div className="p-4 rounded-lg bg-destructive/10 border border-destructive/30 space-y-3">
                   <label className="text-xs font-bold text-destructive flex items-center gap-1.5">
-                    <AlertTriangle className="w-4 h-4" />
+                    <AppIcons.warning className="w-4 h-4" />
                     Mandatory Rejection Reason:
                   </label>
                   <Input
@@ -301,11 +290,11 @@ export default function ReviewsPage() {
               <div className="p-4 border-t border-border bg-muted/30 flex items-center justify-between">
                 <Button
                   onClick={() => setShowRejectModal(true)}
-                  variant="outline"
+                  variant="destructive"
                   size="sm"
-                  className="text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30 gap-1.5"
+                  className="gap-1.5"
                 >
-                  <XCircle className="w-4 h-4" />
+                  <AppIcons.reject className="w-3.5 h-3.5" />
                   Reject with Reason
                 </Button>
 
@@ -314,18 +303,18 @@ export default function ReviewsPage() {
                     onClick={handleEditAndApprove}
                     variant="outline"
                     size="sm"
-                    className="text-primary hover:text-primary hover:bg-primary/10 border-primary/30 gap-1.5"
+                    className="gap-1.5"
                   >
-                    <Edit3 className="w-4 h-4" />
+                    <AppIcons.check className="w-3.5 h-3.5" />
                     Edit &amp; Approve
                   </Button>
 
                   <Button
                     onClick={handleApprove}
                     size="sm"
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                    className="gap-1.5 font-semibold shadow-xs"
                   >
-                    <CheckCircle2 className="w-4 h-4" />
+                    <AppIcons.approve className="w-3.5 h-3.5" />
                     Approve Proposal
                   </Button>
                 </div>

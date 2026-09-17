@@ -2,23 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import {
-  Activity,
-  DollarSign,
-  Cpu,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  Layers,
-  ChevronDown,
-  ChevronRight,
-  Database,
-  Search,
-  Filter,
-  ShieldAlert,
-  Sparkles,
-  ExternalLink,
-} from "lucide-react";
+import { AppIcons } from "@/components/ui/icons";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -149,10 +133,7 @@ export default function RunTracePage() {
           {/* Waterfall Steps Timeline */}
           <Card className="p-5 shadow-sm bg-card border-border">
             <h3 className="text-sm font-bold text-foreground font-mono mb-4 flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-primary" />
-                EXECUTION SPAN WATERFALL ({steps.length} SPANS)
-              </span>
+              <span>EXECUTION SPAN WATERFALL ({steps.length} SPANS)</span>
               <span className="text-xs font-normal text-muted-foreground">Click any span to inspect payload</span>
             </h3>
 
@@ -198,8 +179,7 @@ export default function RunTracePage() {
             <Card className="p-5 space-y-6 shadow-sm bg-card border-border">
               <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-border pb-4 gap-2">
                 <div>
-                  <h3 className="text-sm font-bold text-foreground font-mono flex items-center gap-2">
-                    <Database className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <h3 className="text-sm font-bold text-foreground font-mono">
                     RETRIEVAL DEBUG INSPECTOR
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
@@ -222,9 +202,8 @@ export default function RunTracePage() {
 
               {/* Applied Filters Card */}
               <div className="p-3.5 rounded-lg bg-muted/40 border border-border text-xs font-mono">
-                <div className="flex items-center gap-2 text-muted-foreground mb-1.5 font-bold">
-                  <Filter className="w-3.5 h-3.5 text-primary" />
-                  <span>APPLIED METADATA FILTERS:</span>
+                <div className="text-muted-foreground mb-1.5 font-bold">
+                  APPLIED METADATA FILTERS:
                 </div>
                 <div className="flex flex-wrap gap-2 text-[11px]">
                   {retrievalTrace.appliedFilters && Object.keys(retrievalTrace.appliedFilters).length > 0 ? (
@@ -338,8 +317,7 @@ export default function RunTracePage() {
             <Card className="p-5 space-y-4 shadow-sm bg-card border-border">
               <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-border pb-3 gap-2">
                 <div>
-                  <h3 className="text-sm font-bold text-foreground font-mono flex items-center gap-2">
-                    <ShieldAlert className="w-4 h-4 text-primary" />
+                  <h3 className="text-sm font-bold text-foreground font-mono">
                     SAFETY RISK GUARD TELEMETRY
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
@@ -375,7 +353,7 @@ export default function RunTracePage() {
               {twistData.violations && twistData.violations.length > 0 && (
                 <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-xs font-mono space-y-1">
                   <span className="text-destructive font-bold flex items-center gap-1.5">
-                    <ShieldAlert className="w-3.5 h-3.5" />
+                    <AppIcons.warning className="w-3.5 h-3.5" />
                     Risk Violations Detected:
                   </span>
                   <ul className="list-disc list-inside space-y-0.5 text-destructive/90">
@@ -390,8 +368,7 @@ export default function RunTracePage() {
 
           {/* Token & Cost Breakdown Panel */}
           <Card className="p-5 shadow-sm bg-card border-border">
-            <h3 className="text-sm font-bold text-foreground font-mono mb-4 flex items-center gap-2">
-              <DollarSign className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <h3 className="text-sm font-bold text-foreground font-mono mb-4">
               PER-CALL TOKEN USAGE &amp; COST ACCOUNTING
             </h3>
 
@@ -437,7 +414,7 @@ export default function RunTracePage() {
         </div>
       ) : (
         <Card className="p-12 text-center text-muted-foreground text-xs bg-muted/20 border-dashed border-border shadow-xs">
-          <Activity className="w-8 h-8 mx-auto mb-2 text-primary opacity-60" />
+          <AppIcons.runs className="w-8 h-8 mx-auto mb-2 text-primary opacity-60" />
           <p className="font-medium text-foreground">Select a run from the history or submit a query on Copilot</p>
           <p className="text-[11px] mt-1 text-muted-foreground">
             Traces visualize dense candidates, FTS candidates, RRF fusion, and per-token pricing.

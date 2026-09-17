@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Sparkles, Lock, Mail, AlertCircle, ArrowRight, Loader2, Shield } from "lucide-react";
+import { AppIcons } from "@/components/ui/icons";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -104,14 +104,11 @@ export default function LoginPage() {
       {/* Main Login Card */}
       <Card className="w-full max-w-md bg-card border-border shadow-xl backdrop-blur-xl p-8 z-10">
         {/* Header Branding */}
-        <div className="flex flex-col items-center text-center mb-8">
-          <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center shadow-md shadow-primary/25 mb-4 text-primary-foreground">
-            <Sparkles className="w-6 h-6" />
-          </div>
-          <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2 font-mono">
+        <div className="flex flex-col items-center text-center mb-6">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground font-mono">
             DOMAIN COPILOT
           </h1>
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-xs text-muted-foreground mt-1.5">
             Clinical Agentic RAG Platform · Secure Access Portal
           </p>
         </div>
@@ -122,7 +119,7 @@ export default function LoginPage() {
             id="auth-error-banner"
             className="mb-6 p-3.5 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs flex items-start gap-2.5 animate-fadeIn"
           >
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <AppIcons.info className="w-4 h-4 shrink-0 mt-0.5" />
             <span>{errorMessage}</span>
           </div>
         )}
@@ -135,7 +132,7 @@ export default function LoginPage() {
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-muted-foreground">
-                <Mail className="w-4 h-4" />
+                <AppIcons.mail className="w-4 h-4" />
               </div>
               <Input
                 id="email"
@@ -163,7 +160,7 @@ export default function LoginPage() {
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-muted-foreground">
-                <Lock className="w-4 h-4" />
+                <AppIcons.lock className="w-4 h-4" />
               </div>
               <Input
                 id="password"
@@ -193,13 +190,13 @@ export default function LoginPage() {
           >
             {loading ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <AppIcons.loading className="w-4 h-4 animate-spin" />
                 <span>Verifying Credentials...</span>
               </>
             ) : (
               <>
                 <span>Sign In</span>
-                <ArrowRight className="w-4 h-4" />
+                <AppIcons.arrowRight className="w-4 h-4" />
               </>
             )}
           </Button>
@@ -208,7 +205,7 @@ export default function LoginPage() {
         {/* Demo Accounts Quick Select */}
         <div className="mt-8 pt-6 border-t border-border">
           <div className="flex items-center gap-1.5 mb-3 text-muted-foreground">
-            <Shield className="w-3.5 h-3.5 text-primary" />
+            <AppIcons.shield className="w-3.5 h-3.5 text-primary" />
             <span className="text-[11px] font-semibold uppercase tracking-wider">
               Quick Select Role (Evaluation)
             </span>

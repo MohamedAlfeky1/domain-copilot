@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { UserCheck, LogOut, Shield } from "lucide-react";
+import { AppIcons } from "@/components/ui/icons";
 
 interface UserProfile {
   id: string;
@@ -85,7 +85,7 @@ export function UserSessionWidget({ initialRole, initialEmail }: { initialRole: 
     <div className="flex flex-col gap-2.5">
       <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200">
         <div className="w-7 h-7 rounded-full bg-sky-100 text-sky-700 border border-sky-200 flex items-center justify-center font-bold text-xs shrink-0">
-          <UserCheck className="w-3.5 h-3.5" />
+          <AppIcons.user className="w-3.5 h-3.5" />
         </div>
         <div className="overflow-hidden flex-1 min-w-0">
           <p className="text-xs font-semibold text-slate-800 truncate capitalize">
@@ -98,15 +98,15 @@ export function UserSessionWidget({ initialRole, initialEmail }: { initialRole: 
         <button
           onClick={handleSignOut}
           title="Sign Out"
-          className="p-1.5 rounded-md hover:bg-slate-200 text-slate-400 hover:text-rose-600 transition-colors"
+          aria-label="Sign Out"
+          className="p-1.5 rounded-md hover:bg-slate-200 text-slate-400 hover:text-rose-600 transition-colors focus:outline-none focus:ring-1 focus:ring-rose-500"
         >
-          <LogOut className="w-3.5 h-3.5" />
+          <AppIcons.logout className="w-3.5 h-3.5" />
         </button>
       </div>
 
       <div>
-        <label className="text-[10px] uppercase font-semibold text-slate-500 tracking-wider mb-1 flex items-center gap-1">
-          <Shield className="w-3 h-3 text-sky-600" />
+        <label className="text-[10px] uppercase font-semibold text-slate-500 tracking-wider mb-1 block">
           Switch Active Role:
         </label>
         <select

@@ -1,17 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import {
-  Award,
-  ShieldCheck,
-  CheckCircle2,
-  XCircle,
-  Play,
-  RefreshCw,
-  TrendingUp,
-  Clock,
-  DollarSign,
-} from "lucide-react";
+import { AppIcons } from "@/components/ui/icons";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -141,7 +131,11 @@ export default function EvaluationPage() {
             size="sm"
             className="gap-1.5 shadow-sm"
           >
-            <Play className={`w-3.5 h-3.5 ${running ? "animate-spin" : ""}`} />
+            {running ? (
+              <AppIcons.loading className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <AppIcons.run className="w-3.5 h-3.5" />
+            )}
             {running ? "Benchmarking Engine..." : "Run Golden Evaluation"}
           </Button>
         </div>
@@ -185,8 +179,9 @@ export default function EvaluationPage() {
             variant="ghost"
             size="sm"
             className="text-muted-foreground hover:text-foreground text-xs font-mono h-8 px-2 gap-1.5"
+            aria-label="Refresh benchmark test cases"
           >
-            <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin text-primary" : ""}`} />
+            <AppIcons.refresh className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
         </div>
@@ -244,12 +239,12 @@ export default function EvaluationPage() {
                     <TableCell className="py-3 px-4 text-right">
                       {tc.pass ? (
                         <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <AppIcons.success className="w-3.5 h-3.5" />
                           PASSED
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-destructive text-[11px] font-bold">
-                          <XCircle className="w-3.5 h-3.5" />
+                          <AppIcons.error className="w-3.5 h-3.5" />
                           FAILED
                         </span>
                       )}

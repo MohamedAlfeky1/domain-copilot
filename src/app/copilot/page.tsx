@@ -1,25 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import {
-  Send,
-  Square,
-  Bot,
-  User,
-  ShieldAlert,
-  CheckCircle,
-  ExternalLink,
-  Sparkles,
-  ChevronRight,
-  Layers,
-  Copy,
-  Check,
-  Cpu,
-  AlertTriangle,
-  Clock,
-  ArrowRight,
-  X,
-} from "lucide-react";
+import { AppIcons } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -268,7 +250,7 @@ export default function CopilotPage() {
         <div className="p-4 border-b border-border bg-card flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-sky-100 text-sky-700 border border-sky-200 flex items-center justify-center">
-              <Bot className="w-4 h-4" />
+              <AppIcons.copilot className="w-4 h-4" />
             </div>
             <div>
               <h2 className="text-sm font-bold text-foreground tracking-tight">Copilot Grounded Workspace</h2>
@@ -284,19 +266,19 @@ export default function CopilotPage() {
                 variant={twistEvaluation.isPermitted ? "success" : "destructive"}
                 className="gap-1.5 font-mono text-[11px]"
               >
-                <ShieldAlert className="w-3.5 h-3.5" />
+                <AppIcons.warning className="w-3.5 h-3.5" />
                 TWIST GUARD: {twistEvaluation.isPermitted ? "PERMITTED" : "TRIPPED"} ({twistEvaluation.computedRiskIndex}/{twistEvaluation.threshold})
               </Badge>
             )}
 
             {isRefused ? (
               <Badge variant="destructive" className="gap-1.5 font-mono text-[11px]">
-                <ShieldAlert className="w-3.5 h-3.5" />
+                <AppIcons.warning className="w-3.5 h-3.5" />
                 REFUSED: LOW EVIDENCE
               </Badge>
             ) : streamedText.length > 0 ? (
               <Badge variant="success" className="gap-1.5 font-mono text-[11px]">
-                <CheckCircle className="w-3.5 h-3.5" />
+                <AppIcons.success className="w-3.5 h-3.5" />
                 GROUNDED SYNTHESIS
               </Badge>
             ) : null}
@@ -308,7 +290,7 @@ export default function CopilotPage() {
                 onClick={handleCopy}
                 className="h-7 px-2.5 text-xs gap-1 text-slate-700"
               >
-                {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                {copied ? <AppIcons.check className="w-3 h-3 text-emerald-600" /> : <AppIcons.copy className="w-3 h-3" />}
                 <span>{copied ? "Copied" : "Copy"}</span>
               </Button>
             )}
@@ -316,12 +298,17 @@ export default function CopilotPage() {
         </div>
 
         {/* Answer Content Panel */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 font-sans text-sm leading-relaxed bg-slate-50/30">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 font-sans text-sm leading-relaxed bg-slate-50/30 flex flex-col">
           {streamedText.length === 0 && !isRefused && (
-            <div className="h-full flex flex-col items-center justify-center text-muted-foreground py-16">
-              <Sparkles className="w-10 h-10 mb-3 text-sky-500 opacity-40 animate-pulse" />
-              <p className="text-base font-semibold text-slate-700">Ask a domain-grounded clinical query</p>
-              <p className="text-xs text-muted-foreground max-w-md text-center mt-1">
+            <div className="flex-1 flex flex-col items-center justify-center text-center py-12 px-4 select-none">
+              <AppIcons.copilot
+                className="w-7 h-7 text-sky-500 mb-3.5 shrink-0"
+                aria-hidden="true"
+              />
+              <h3 className="text-base font-semibold text-slate-800 tracking-tight">
+                Ask a domain-grounded clinical query
+              </h3>
+              <p className="text-xs text-muted-foreground max-w-sm mt-1.5 leading-relaxed">
                 The multi-agent orchestrator will perform hybrid pgvector retrieval, verify evidence with specialists, and stream citations.
               </p>
             </div>
@@ -330,7 +317,7 @@ export default function CopilotPage() {
           {isRefused && (
             <Card className="border-rose-200 bg-rose-50/50 p-4 shadow-xs">
               <div className="flex items-center gap-2 font-semibold text-rose-800 text-xs">
-                <ShieldAlert className="w-4 h-4 text-rose-600" />
+                <AppIcons.warning className="w-4 h-4 text-rose-600" />
                 <span>Low-Evidence Refusal Triggered</span>
               </div>
               <p className="text-xs text-rose-700 mt-1.5 leading-normal">{refusalMessage}</p>
@@ -342,7 +329,7 @@ export default function CopilotPage() {
             <Card className="border-rose-200 bg-rose-50/50 p-4 shadow-xs space-y-2">
               <div className="flex items-center justify-between font-semibold text-rose-800 text-xs">
                 <div className="flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 text-rose-600" />
+                  <AppIcons.warning className="w-4 h-4 text-rose-600" />
                   <span>Mandatory Safety Guard Active: Risk Ceiling Exceeded</span>
                 </div>
                 <Badge variant="destructive" className="font-mono text-[10px]">
@@ -366,7 +353,7 @@ export default function CopilotPage() {
           {isAwaitingApproval && pendingApproval && (
             <Card className="border-amber-200 bg-amber-50/50 p-4 shadow-xs space-y-3">
               <div className="flex items-center gap-2 font-semibold text-amber-900 text-xs">
-                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                <AppIcons.warning className="w-4 h-4 text-amber-600" />
                 <span>Workflow Paused: Human Approval Required</span>
               </div>
               <p className="text-xs text-amber-800 leading-normal">{pendingApproval.proposedAction}</p>
@@ -397,13 +384,13 @@ export default function CopilotPage() {
                   asChild
                 >
                   <a href="/reviews">
-                    <ShieldAlert className="w-3.5 h-3.5" />
+                    <AppIcons.warning className="w-3.5 h-3.5" />
                     Review in HITL Queue
-                    <ArrowRight className="w-3 h-3" />
+                    <AppIcons.arrowRight className="w-3 h-3" />
                   </a>
                 </Button>
                 <span className="text-[10px] font-mono text-amber-700 flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
+                  <AppIcons.pending className="w-3 h-3" />
                   Approval ID: {pendingApproval.approvalId}
                 </span>
               </div>
@@ -421,8 +408,7 @@ export default function CopilotPage() {
           {/* Citations Chip Bar */}
           {citations.length > 0 && (
             <div className="pt-2">
-              <p className="text-[11px] font-mono text-muted-foreground mb-2 flex items-center gap-1.5 font-semibold">
-                <Layers className="w-3.5 h-3.5 text-sky-600" />
+              <p className="text-[11px] font-mono text-muted-foreground mb-2 font-semibold">
                 VERIFIED CITATIONS ({citations.length}):
               </p>
               <div className="flex flex-wrap gap-2">
@@ -433,7 +419,7 @@ export default function CopilotPage() {
                     className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-[11px] font-mono text-sky-700 transition-colors shadow-2xs"
                   >
                     <span>[{c.documentName}, p.{c.page || 1}]</span>
-                    <ExternalLink className="w-2.5 h-2.5 text-slate-400" />
+                    <AppIcons.external className="w-2.5 h-2.5 text-slate-400" />
                   </button>
                 ))}
               </div>
@@ -444,8 +430,7 @@ export default function CopilotPage() {
         {/* Live Multi-Agent Progress Rail */}
         <div className="px-5 py-2.5 border-t border-border bg-slate-50">
           <div className="flex items-center justify-between text-[11px] font-mono mb-2">
-            <span className="text-muted-foreground flex items-center gap-1.5 font-semibold">
-              <Cpu className="w-3.5 h-3.5 text-sky-600" />
+            <span className="text-muted-foreground font-semibold">
               LIVE AGENT WORKFLOW:
             </span>
             {streaming && <span className="text-sky-600 font-semibold animate-pulse">Running...</span>}
@@ -466,7 +451,7 @@ export default function CopilotPage() {
               >
                 <span className="font-bold">{String(idx + 1).padStart(2, "0")}</span>
                 <span className="truncate">{step.agent}</span>
-                {step.status === "approval_pending" && <Clock className="w-3 h-3 text-amber-600" />}
+                {step.status === "approval_pending" && <AppIcons.pending className="w-3 h-3 text-amber-600" />}
               </div>
             ))}
           </div>
@@ -496,16 +481,16 @@ export default function CopilotPage() {
                 onClick={handleCancel}
                 className="gap-1.5 text-xs font-semibold shrink-0 h-auto"
               >
-                <Square className="w-3.5 h-3.5 fill-current" />
+                <AppIcons.stop className="w-3.5 h-3.5 fill-current" />
                 Cancel
               </Button>
             ) : (
               <Button
                 type="submit"
                 disabled={!query.trim()}
-                className="gap-1.5 text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white shrink-0 h-auto px-5"
+                className="gap-1.5 text-xs font-semibold shrink-0 h-auto px-5 shadow-xs"
               >
-                <Send className="w-3.5 h-3.5" />
+                <AppIcons.send className="w-3.5 h-3.5" />
                 Run
               </Button>
             )}
@@ -517,8 +502,7 @@ export default function CopilotPage() {
       {selectedCitation && (
         <div className="w-80 bg-card border border-border rounded-xl flex flex-col shrink-0 shadow-lg overflow-hidden animate-in slide-in-from-right-5">
           <div className="p-4 border-b border-border bg-slate-50 flex items-center justify-between">
-            <h3 className="text-xs font-bold text-foreground font-mono flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-sky-600" />
+            <h3 className="text-xs font-bold text-foreground font-mono">
               SOURCE EVIDENCE DRAWER
             </h3>
             <Button

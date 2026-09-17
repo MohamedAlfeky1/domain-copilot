@@ -1,19 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import {
-  FileText,
-  Layers,
-  CheckCircle2,
-  AlertTriangle,
-  UploadCloud,
-  RefreshCw,
-  Clock,
-  Database,
-  Search,
-  ExternalLink,
-  X,
-} from "lucide-react";
+import { AppIcons } from "@/components/ui/icons";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -143,18 +131,17 @@ export default function DashboardPage() {
               onClick={fetchCorpus}
               className="gap-1.5 text-xs text-slate-700"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              <AppIcons.refresh className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
             <label className="inline-flex">
               <Button
-                variant="default"
                 size="sm"
-                className="gap-1.5 text-xs cursor-pointer bg-sky-600 hover:bg-sky-500 shadow-xs"
+                className="gap-1.5 text-xs cursor-pointer shadow-xs font-semibold"
                 asChild
               >
                 <span>
-                  <UploadCloud className="w-4 h-4" />
+                  <AppIcons.upload className="w-4 h-4" />
                   <span>{uploading ? "Ingesting..." : "Upload Document"}</span>
                 </span>
               </Button>
@@ -175,7 +162,7 @@ export default function DashboardPage() {
         <Card className="shadow-xs p-4">
           <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
             <span className="font-medium">Documents</span>
-            <FileText className="w-4 h-4 text-sky-600" />
+            <AppIcons.documents className="w-4 h-4 text-sky-600" />
           </div>
           <p className="text-2xl font-bold font-mono text-foreground">{documents.length}</p>
           <p className="text-[10px] text-muted-foreground mt-1">Corpus inventory</p>
@@ -184,7 +171,7 @@ export default function DashboardPage() {
         <Card className="shadow-xs p-4">
           <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
             <span className="font-medium">Total Pages</span>
-            <Layers className="w-4 h-4 text-indigo-600" />
+            <AppIcons.pages className="w-4 h-4 text-indigo-600" />
           </div>
           <p className="text-2xl font-bold font-mono text-foreground">{totalPages}</p>
           <p className="text-[10px] text-muted-foreground mt-1">Clinical guideline pages</p>
@@ -193,7 +180,7 @@ export default function DashboardPage() {
         <Card className="shadow-xs p-4">
           <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
             <span className="font-medium">Indexed Chunks</span>
-            <Database className="w-4 h-4 text-emerald-600" />
+            <AppIcons.chunks className="w-4 h-4 text-emerald-600" />
           </div>
           <p className="text-2xl font-bold font-mono text-emerald-600">{totalChunks}</p>
           <p className="text-[10px] text-emerald-700/80 mt-1">1536d pgvector ready</p>
@@ -202,7 +189,7 @@ export default function DashboardPage() {
         <Card className="shadow-xs p-4">
           <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
             <span className="font-medium">Pipeline Failures</span>
-            <AlertTriangle className={`w-4 h-4 ${failureCount > 0 ? "text-rose-500" : "text-slate-400"}`} />
+            <AppIcons.failures className={`w-4 h-4 ${failureCount > 0 ? "text-rose-500" : "text-slate-400"}`} />
           </div>
           <p className={`text-2xl font-bold font-mono ${failureCount > 0 ? "text-rose-600" : "text-foreground"}`}>
             {failureCount}
@@ -213,7 +200,7 @@ export default function DashboardPage() {
         <Card className="shadow-xs p-4 col-span-2 md:col-span-1">
           <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
             <span className="font-medium">Last Ingest</span>
-            <Clock className="w-4 h-4 text-purple-600" />
+            <AppIcons.pending className="w-4 h-4 text-purple-600" />
           </div>
           <p className="text-xs font-mono text-foreground mt-2 truncate font-medium">
             {documents.length > 0 ? new Date(documents[0].createdAt).toLocaleTimeString() : "None"}
@@ -248,7 +235,7 @@ export default function DashboardPage() {
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-mono font-semibold text-sky-600">0{idx + 1}</span>
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <AppIcons.success className="w-3.5 h-3.5 text-emerald-600" />
                 </div>
                 <h4 className="text-sm font-bold text-slate-800">{item.stage}</h4>
                 <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">{item.desc}</p>
@@ -277,7 +264,7 @@ export default function DashboardPage() {
 
         {documents.length === 0 ? (
           <div className="p-12 text-center text-muted-foreground">
-            <Database className="w-8 h-8 mx-auto mb-2 opacity-40 text-sky-600" />
+            <AppIcons.corpus className="w-8 h-8 mx-auto mb-2 opacity-40 text-sky-600" />
             <p className="text-sm font-medium">No documents in corpus</p>
             <p className="text-xs mt-1">Upload files to populate the knowledge base.</p>
           </div>
@@ -301,7 +288,7 @@ export default function DashboardPage() {
                   <TableRow key={doc.id} className="hover:bg-slate-50/80">
                     <TableCell className="py-3 px-4 font-medium text-slate-900">
                       <div className="flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-sky-600 shrink-0" />
+                        <AppIcons.documents className="w-4 h-4 text-sky-600 shrink-0" />
                         <span className="truncate max-w-xs">{doc.name}</span>
                       </div>
                     </TableCell>
@@ -314,12 +301,12 @@ export default function DashboardPage() {
                     <TableCell className="py-3 px-4">
                       {isFailed ? (
                         <Badge variant="destructive" className="gap-1 font-mono text-[10px]">
-                          <AlertTriangle className="w-3 h-3" />
+                          <AppIcons.warning className="w-3 h-3" />
                           FAILED
                         </Badge>
                       ) : (
                         <Badge variant="success" className="gap-1 font-mono text-[10px]">
-                          <CheckCircle2 className="w-3 h-3" />
+                          <AppIcons.success className="w-3 h-3" />
                           {job ? `${job.stage} ${job.progressPct}%` : doc.status}
                         </Badge>
                       )}
@@ -332,7 +319,7 @@ export default function DashboardPage() {
                         variant="outline"
                         size="sm"
                         onClick={() => inspectDoc(doc)}
-                        className="h-7 text-xs text-sky-700 hover:text-sky-800 border-sky-200 bg-sky-50/50 hover:bg-sky-50"
+                        className="h-7 text-xs"
                       >
                         Inspect Chunks
                       </Button>
@@ -370,9 +357,10 @@ export default function DashboardPage() {
                 variant="ghost"
                 size="sm"
                 onClick={() => setSelectedDoc(null)}
+                aria-label="Close modal"
                 className="h-8 w-8 p-0 text-slate-500 hover:text-foreground"
               >
-                <X className="w-4 h-4" />
+                <AppIcons.close className="w-4 h-4" />
               </Button>
             </div>
 

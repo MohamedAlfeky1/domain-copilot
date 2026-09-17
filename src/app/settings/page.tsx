@@ -1,17 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import {
-  Settings,
-  ShieldCheck,
-  Cpu,
-  Database,
-  Lock,
-  CheckCircle2,
-  AlertTriangle,
-  Key,
-  Globe,
-} from "lucide-react";
+import { AppIcons } from "@/components/ui/icons";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,7 +47,7 @@ export default function SettingsPage() {
       {/* Variant Safety Gate Section */}
       <Card className="p-5 space-y-4 shadow-sm bg-card border-border">
         <div className="flex items-center gap-2 text-sm font-bold text-foreground font-mono">
-          <Lock className="w-4 h-4 text-primary" />
+          <AppIcons.lock className="w-[18px] h-[18px] text-slate-700 shrink-0" />
           <span>VARIANT SAFETY GATE (ASSESSMENT LOCK)</span>
         </div>
         <p className="text-xs text-muted-foreground leading-normal">
@@ -96,7 +86,7 @@ export default function SettingsPage() {
       {/* AI Provider Configuration */}
       <Card className="p-5 space-y-4 shadow-sm bg-card border-border">
         <div className="flex items-center gap-2 text-sm font-bold text-foreground font-mono">
-          <Cpu className="w-4 h-4 text-primary" />
+          <AppIcons.cpu className="w-[18px] h-[18px] text-slate-700 shrink-0" />
           <span>AI &amp; LLM PROVIDER CONFIGURATION</span>
         </div>
 
@@ -128,14 +118,14 @@ export default function SettingsPage() {
       {/* System Health Check Endpoints */}
       <Card className="p-5 space-y-3 shadow-sm bg-card border-border">
         <div className="flex items-center gap-2 text-sm font-bold text-foreground font-mono">
-          <Database className="w-4 h-4 text-primary" />
+          <AppIcons.database className="w-[18px] h-[18px] text-slate-700 shrink-0" />
           <span>SYSTEM READINESS &amp; HEALTH</span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
           <div className="p-3 rounded-lg bg-muted/40 border border-border flex items-center justify-between">
             <span className="text-muted-foreground">Liveness Route:</span>
-            <a href="/healthz" target="_blank" className="text-primary hover:underline font-semibold">
+            <a href="/healthz" target="_blank" className="text-sky-600 hover:underline font-semibold">
               GET /healthz
             </a>
           </div>
