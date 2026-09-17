@@ -101,7 +101,7 @@ export const SUPPORTED_EMBEDDING_PROVIDERS: readonly SupportedEmbeddingProvider[
  * Controlled independently by EMBEDDING_PROVIDER environment variable.
  */
 export function resolveEmbeddingProvider(config?: EmbeddingProviderConfig): IAIProviderPort {
-  const rawProvider = config?.provider ?? process.env.EMBEDDING_PROVIDER ?? "openai";
+  const rawProvider = config?.provider ?? process.env.EMBEDDING_PROVIDER ?? "gemini";
   const provider = rawProvider.trim().toLowerCase();
 
   if (!provider) {
@@ -135,7 +135,7 @@ export function resolveEmbeddingProvider(config?: EmbeddingProviderConfig): IAIP
           "GEMINI_API_KEY is required in environment variables."
         );
       }
-      const model = config?.model ?? process.env.GEMINI_EMBEDDING_MODEL ?? "models/embedding-001";
+      const model = config?.model ?? process.env.GEMINI_EMBEDDING_MODEL ?? "models/gemini-embedding-001";
 
       // Reject mixed vector space configuration: OpenAI model on Gemini provider
       if (model.toLowerCase().includes("text-embedding-3") || model.toLowerCase().includes("ada")) {

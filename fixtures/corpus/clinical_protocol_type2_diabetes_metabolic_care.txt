@@ -1,0 +1,56 @@
+# Clinical Protocol: Type 2 Diabetes Glycemic Control & Metabolic Care
+
+## Category: Endocrinology & Metabolic Care · Clinical Guideline v1.0
+
+### Section 1: Clinical Scope & Diagnostic Criteria
+Type 2 Diabetes Mellitus (داء السكري من النوع الثاني) is a chronic progressive metabolic disorder characterized by peripheral insulin resistance, progressive pancreatic beta-cell dysfunction, and systemic hyperglycemia. Diagnostic confirmation requires meeting at least one of the following validated criteria:
+1. Fasting Plasma Glucose (FPG / سكر الدم الصيامي) >= 126 mg/dL (7.0 mmol/L) following at least 8 hours of fast.
+2. Glycated Hemoglobin (HbA1c / الهيموجلوبين السكري) >= 6.5% (48 mmol/mol) measured by NGSP-certified laboratory assay.
+3. 2-Hour Plasma Glucose during 75-gram Oral Glucose Tolerance Test (OGTT) >= 200 mg/dL (11.1 mmol/L).
+4. Random Plasma Glucose >= 200 mg/dL (11.1 mmol/L) in the presence of classic hyperglycemia symptoms: polyuria (فرط التبول), polydipsia (العطش المفرط), polyphagia (فرط الشهية والجوع), and unexplained rapid weight loss (فقدان الوزن غير المبرر).
+
+### Section 2: Glycemic Targets & Monitoring Guidelines
+Glycemic targets must be individualized based on patient age, duration of diabetes, cardiovascular comorbidities, and hypoglycemia risk:
+1. Standard Adult Targets:
+   - Target HbA1c < 7.0% (53 mmol/mol) for most non-pregnant adult patients.
+   - Preprandial / Fasting Capillary Glucose: 80 to 130 mg/dL (4.4 to 7.2 mmol/L).
+   - Peak Postprandial Capillary Glucose (1–2 hours following meal start): < 180 mg/dL (10.0 mmol/L).
+2. Relaxed Target Cohorts:
+   - Target HbA1c < 8.0% (64 mmol/mol) for elderly patients, those with history of severe hypoglycemia, extensive microvascular/macrovascular disease, or limited life expectancy.
+3. Monitoring Intervals: Measure HbA1c every 3 months in patients with unreached targets or therapy adjustments, and every 6 months in stable patients meeting targets.
+
+### Section 3: Stepwise Pharmacotherapy & Insulin Titration
+Pharmacological therapy should be guided by glycemic efficacy, weight impact, cardiovascular and renal risk stratification:
+1. First-Line Oral Therapy - Metformin (ميتفورمين):
+   - Initiation: Start Metformin 500 mg once or twice daily with main meals to minimize gastrointestinal discomfort.
+   - Titration: Gradually increase weekly to a target dose of 1000 mg twice daily (maximum 2000 mg/day).
+   - Renal Safety: Monitor estimated glomerular filtration rate (eGFR). Reduce maximum dose to 1000 mg/day if eGFR is 30–44 mL/min/1.73m2. Metformin is strictly contraindicated if eGFR < 30 mL/min/1.73m2 due to lactic acidosis risk.
+2. Cardiorenal Protection Adjuncts:
+   - SGLT2 Inhibitors (مثبطات ناقل الصوديوم والجلوكوز 2) (Empagliflozin 10–25 mg daily or Dapagliflozin 10 mg daily): Indicated for patients with established atherosclerotic cardiovascular disease, heart failure with reduced ejection fraction, or chronic kidney disease (eGFR 20–60 mL/min).
+   - GLP-1 Receptor Agonists (منبهات مستقبلات الببتيد الشبيه بالجلوكاجون 1) (Semaglutide 0.5–2.0 mg weekly subcutaneous or Liraglutide 1.2–1.8 mg daily): Strongly recommended for patients with ASCVD or high obesity indices.
+3. Basal Insulin Initiation (الإنسولين القاعدي):
+   - Indication: HbA1c > 10% (86 mmol/mol) or fasting glucose > 300 mg/dL at presentation, or failure of multiple non-insulin agents.
+   - Initial Regimen: Insulin Glargine (U-100) or Insulin Degludec (U-100/U-200) administered subcutaneously at bedtime.
+   - Starting Dose: 10 units daily or 0.1 to 0.2 units/kg/day.
+   - Titration Rule: Increase dose by 2 units every 3 days until fasting plasma glucose is reliably between 80 and 130 mg/dL without causing hypoglycemia.
+
+### Section 4: Hypoglycemia Recognition & The "Rule of 15"
+Hypoglycemia is an acute medical emergency occurring primarily in patients treated with insulin or sulfonylureas.
+1. Diagnostic Definition: Capillary blood glucose < 70 mg/dL (3.9 mmol/L).
+2. Clinical Signs and Symptoms (أعراض هبوط السكر):
+   - Autonomic: Tremors (رعشة الأطراف), diaphoresis (تعرق بارد), palpitations and tachycardia (خفقان وتسارع ضربات القلب), pallor, anxiety, and intense hunger.
+   - Neuroglycopenic: Confusion (ارتباك ذهني), dizziness and lightheadedness (دوار), slurred speech, visual disturbances, seizure, and coma.
+3. Management Protocol - The "Rule of 15" (قاعدة 15 لإدارة هبوط السكر):
+   - Step 1: Administer 15 grams of simple fast-acting carbohydrate (e.g., 3 to 4 glucose tablets, 120 mL / 0.5 cup of fruit juice, or 1 tablespoon of sugar/honey). Avoid complex fats or proteins which delay carbohydrate absorption.
+   - Step 2: Wait 15 minutes in a resting position.
+   - Step 3: Recheck capillary blood glucose.
+   - Step 4: If blood glucose remains < 70 mg/dL, repeat administration of 15 grams of fast-acting carbohydrate and recheck in 15 minutes.
+   - Step 5: Once blood glucose rises above 70 mg/dL, provide a meal or complex carbohydrate/protein snack (such as crackers with cheese) to prevent recurrent hypoglycemia.
+4. Severe Hypoglycemia (Patient unconscious or unable to swallow safely):
+   - Glucagon 1 mg intramuscular or subcutaneous injection, or 3 mg nasal powder.
+   - Intravenous access: Administer 25 to 50 mL of 50% Dextrose (D50W) IV push over 2 to 3 minutes, followed by continuous infusion of 5% or 10% Dextrose.
+
+### Section 5: Chronic Complication Screening & Renal Monitoring
+1. Diabetic Kidney Disease: Annual urinary albumin-to-creatinine ratio (UACR) and serum creatinine with eGFR. Initiate ACE inhibitors or ARBs if UACR >= 30 mg/g.
+2. Diabetic Retinopathy: Annual dilated fundoscopic eye exam by an ophthalmologist.
+3. Comprehensive Diabetic Foot Exam: Annual screening with 10-gram monofilament test, pinprick sensation, and pedal pulse palpation to prevent diabetic ulceration and peripheral neuropathy.

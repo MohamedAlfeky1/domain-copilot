@@ -4,7 +4,7 @@
  * Verifies Gemini Embedding 001 Provider Adapter:
  * A. Provider Selection: EMBEDDING_PROVIDER=gemini resolves GeminiEmbeddingAdapter
  * B. Missing Configuration: Missing GEMINI_API_KEY throws ConfigurationError
- * C. Correct Model: Gemini Embedding 001 (models/embedding-001) used by default / config
+ * C. Correct Model: Gemini Embedding 001 (models/gemini-embedding-001) used by default / config
  * D. Document Embedding: Request task type is RETRIEVAL_DOCUMENT for stored chunks
  * E. Query Embedding: Request task type is RETRIEVAL_QUERY for search queries
  * F. Output Dimension: Exactly 1536 dimensions; rejects wrong dimensions with typed error
@@ -98,12 +98,12 @@ async function runGeminiEmbeddingTests() {
     await test("Scenario A1: Factory resolves GeminiEmbeddingAdapter when EMBEDDING_PROVIDER=gemini", async () => {
       process.env.EMBEDDING_PROVIDER = "gemini";
       process.env.GEMINI_API_KEY = "AIzaSyTestKey1234567890abcdef1234567890";
-      process.env.GEMINI_EMBEDDING_MODEL = "models/embedding-001";
+      process.env.GEMINI_EMBEDDING_MODEL = "models/gemini-embedding-001";
 
       const provider = resolveEmbeddingProvider();
       assert(provider instanceof GeminiEmbeddingAdapter, "Should be GeminiEmbeddingAdapter");
       assert.strictEqual(provider.providerName, "gemini");
-      assert.strictEqual(provider.getModelName(), "models/embedding-001");
+      assert.strictEqual(provider.getModelName(), "models/gemini-embedding-001");
       assert.strictEqual(provider.getDimension(), 1536);
     });
 
@@ -111,11 +111,11 @@ async function runGeminiEmbeddingTests() {
       const provider = createEmbeddingProvider({
         provider: "gemini",
         apiKey: "AIzaSyExplicitKey",
-        model: "embedding-001",
+        model: "gemini-embedding-001",
       });
       assert(provider instanceof GeminiEmbeddingAdapter);
       assert.strictEqual(provider.providerName, "gemini");
-      assert.strictEqual(provider.getModelName(), "models/embedding-001");
+      assert.strictEqual(provider.getModelName(), "models/gemini-embedding-001");
     });
 
     // ------------------------------------------------------------------------
@@ -156,7 +156,7 @@ async function runGeminiEmbeddingTests() {
       const adapter = new GeminiEmbeddingAdapter({
         apiKey: "AIzaSyTest",
       });
-      assert.strictEqual(adapter.getModelName(), "models/embedding-001");
+      assert.strictEqual(adapter.getModelName(), "models/gemini-embedding-001");
     });
 
     await test("Scenario C2: Rejects non-embedding models for Gemini embedding provider", async () => {
@@ -421,6 +421,7 @@ async function runGeminiEmbeddingTests() {
     // ------------------------------------------------------------------------
     await test("Scenario J1: EMBEDDING_PROVIDER=openai continues to select OpenAI adapter", async () => {
       process.env.EMBEDDING_PROVIDER = "openai";
+      process.env.EMBEDDING_MODEL = "text-embedding-3-small";
       process.env.OPENAI_API_KEY = "your_openai_api_key_here";
       delete process.env.GEMINI_API_KEY;
 
@@ -442,6 +443,7 @@ async function runGeminiEmbeddingTests() {
       process.env.OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet";
 
       process.env.EMBEDDING_PROVIDER = "openai";
+      process.env.EMBEDDING_MODEL = "text-embedding-3-small";
       process.env.OPENAI_API_KEY = "sk-openai-test-key";
       delete process.env.GEMINI_API_KEY;
 
@@ -478,12 +480,12 @@ async function runGeminiEmbeddingTests() {
           resolveEmbeddingProvider({
             provider: "openai",
             apiKey: "sk-test",
-            model: "models/embedding-001",
+          model: "models/gemini-embedding-001",
           });
         },
         (err) => {
           assert(err instanceof ConfigurationError);
-          assert(err.message.includes("Invalid embedding model 'models/embedding-001' for OpenAI provider"));
+          assert(err.message.includes("Invalid embedding model 'models/gemini-embedding-001' for OpenAI provider"));
           return true;
         }
       );
@@ -492,7 +494,7 @@ async function runGeminiEmbeddingTests() {
     await test("Scenario L3: validateVectorSpaceConsistency blocks cross-model vector operations", async () => {
       assert.throws(
         () => {
-          validateVectorSpaceConsistency("models/embedding-001", "text-embedding-3-small");
+        validateVectorSpaceConsistency("models/gemini-embedding-001", "text-embedding-3-small");
         },
         (err) => {
           assert(err instanceof ConfigurationError);
@@ -506,7 +508,7 @@ async function runGeminiEmbeddingTests() {
         validateVectorSpaceConsistency("text-embedding-3-small", "text-embedding-3-small");
       });
       assert.doesNotThrow(() => {
-        validateVectorSpaceConsistency("models/embedding-001", "models/embedding-001");
+        validateVectorSpaceConsistency("models/gemini-embedding-001", "models/gemini-embedding-001");
       });
     });
   } finally {
