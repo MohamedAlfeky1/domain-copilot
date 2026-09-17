@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { UserCheck, LogOut, Shield } from "lucide-react";
+import { AppIcons } from "@/components/ui/icons";
 
 interface UserProfile {
   id: string;
@@ -83,30 +83,30 @@ export function UserSessionWidget({ initialRole, initialEmail }: { initialRole: 
 
   return (
     <div className="flex flex-col gap-2.5">
-      <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-slate-800/60 border border-slate-700/60">
-        <div className="w-7 h-7 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold text-xs shrink-0">
-          <UserCheck className="w-3.5 h-3.5" />
+      <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200">
+        <div className="w-7 h-7 rounded-full bg-sky-100 text-sky-700 border border-sky-200 flex items-center justify-center font-bold text-xs shrink-0">
+          <AppIcons.user className="w-3.5 h-3.5" />
         </div>
         <div className="overflow-hidden flex-1 min-w-0">
-          <p className="text-xs font-semibold text-slate-200 truncate capitalize">
+          <p className="text-xs font-semibold text-slate-800 truncate capitalize">
             {currentUser.email ? currentUser.email.split("@")[0] : "Authenticated"}
           </p>
-          <p className="text-[10px] text-emerald-400 font-mono font-bold tracking-wider">
+          <p className="text-[10px] text-emerald-600 font-mono font-bold tracking-wider">
             ROLE: {currentUser.role}
           </p>
         </div>
         <button
           onClick={handleSignOut}
           title="Sign Out"
-          className="p-1.5 rounded-md hover:bg-slate-700/60 text-slate-400 hover:text-rose-400 transition-colors"
+          aria-label="Sign Out"
+          className="p-1.5 rounded-md hover:bg-slate-200 text-slate-400 hover:text-rose-600 transition-colors focus:outline-none focus:ring-1 focus:ring-rose-500"
         >
-          <LogOut className="w-3.5 h-3.5" />
+          <AppIcons.logout className="w-3.5 h-3.5" />
         </button>
       </div>
 
       <div>
-        <label className="block text-[10px] uppercase font-semibold text-slate-400 tracking-wider mb-1 flex items-center gap-1">
-          <Shield className="w-3 h-3 text-sky-400" />
+        <label className="text-[10px] uppercase font-semibold text-slate-500 tracking-wider mb-1 block">
           Switch Active Role:
         </label>
         <select
@@ -114,7 +114,7 @@ export function UserSessionWidget({ initialRole, initialEmail }: { initialRole: 
           onChange={handleRoleChange}
           disabled={switching}
           aria-label="Switch Authenticated Role"
-          className="w-full bg-slate-950 border border-slate-700/80 rounded px-2 py-1 text-[11px] font-mono text-slate-300 focus:outline-none focus:border-sky-500 cursor-pointer disabled:opacity-50"
+          className="w-full bg-white border border-slate-200 rounded-md px-2 py-1 text-[11px] font-mono text-slate-700 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 cursor-pointer disabled:opacity-50"
         >
           {PRESET_USERS.map((u) => (
             <option key={u.email} value={u.email}>

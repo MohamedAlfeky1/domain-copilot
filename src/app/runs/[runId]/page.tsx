@@ -2,23 +2,18 @@
 
 import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { AppIcons } from "@/components/ui/icons";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
-  Activity,
-  DollarSign,
-  Cpu,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  Layers,
-  ChevronDown,
-  ChevronRight,
-  Database,
-  Search,
-  Filter,
-  ShieldAlert,
-  Sparkles,
-  ExternalLink,
-} from "lucide-react";
+  Table,
+  TableHeader,
+  TableBody,
+  TableHead,
+  TableRow,
+  TableCell,
+} from "@/components/ui/table";
 
 export default function RunTracePage() {
   const params = useParams();
@@ -74,69 +69,72 @@ export default function RunTracePage() {
   const twistStep = steps.find((s) => s.stepType === "GUARDRAIL" || s.agent?.includes("Twist Guard"));
   const twistData = twistStep?.outputPayload as any;
 
+  // Active configured model string
+  const activeModelDisplay =
+    usage.length > 0
+      ? `${usage[0].model} (${usage[0].provider})`
+      : selectedRun?.model || "active-llm / 1536d";
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 flex items-center justify-between">
+      <Card className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm bg-card border-border">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-cyan-500/20 text-cyan-400 font-semibold uppercase">
+            <Badge variant="info" className="text-[11px] font-mono uppercase">
               HYBRID TELEMETRY
-            </span>
-            <span className="text-xs text-slate-400">Trace &amp; Retrieval Inspector</span>
+            </Badge>
+            <span className="text-xs text-muted-foreground">Trace &amp; Retrieval Inspector</span>
           </div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Trace &amp; Retrieval Inspector</h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <h2 className="text-xl font-bold text-foreground tracking-tight">Trace &amp; Retrieval Inspector</h2>
+          <p className="text-xs text-muted-foreground mt-1">
             End-to-end telemetry: Dense pgvector candidates, PostgreSQL FTS candidates, RRF fusion scoring, and step waterfall.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="px-3 py-1.5 rounded bg-slate-800 border border-slate-700 font-mono text-xs text-slate-300">
-            Run ID: <strong className="text-sky-400">{selectedRun?.id || runIdParam}</strong>
+          <div className="px-3 py-1.5 rounded-md bg-muted border border-border font-mono text-xs text-muted-foreground">
+            Run ID: <strong className="text-foreground">{selectedRun?.id || runIdParam}</strong>
           </div>
         </div>
-      </div>
+      </Card>
 
       {selectedRun ? (
         <div className="space-y-6">
-          {/* Run Header KPIs (Part 3 Section 4) */}
-          <div className="grid grid-cols-4 gap-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 font-mono">
-              <span className="text-[10px] text-slate-500 uppercase">Correlation ID</span>
-              <p className="text-xs text-sky-300 font-bold truncate mt-1">{selectedRun.correlationId}</p>
-            </div>
-            <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 font-mono">
-              <span className="text-[10px] text-slate-500 uppercase">Execution Status</span>
-              <p className="text-xs text-emerald-400 font-bold mt-1">{selectedRun.status}</p>
-            </div>
-            <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 font-mono">
-              <span className="text-[10px] text-slate-500 uppercase">Configured Model</span>
-              <p className="text-xs text-sky-400 font-bold mt-1">gpt-4o / 1536d</p>
-            </div>
-            <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 font-mono">
-              <span className="text-[10px] text-slate-500 uppercase">Total Tokens / Cost</span>
-              <p className="text-xs text-emerald-400 font-bold mt-1">
-                {usage.reduce((acc, u) => acc + u.totalTokens, 0)} tok / $
-                {usage.reduce((acc, u) => acc + u.costUsd, 0).toFixed(5)}
+          {/* Run Header KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card className="p-4 font-mono shadow-xs bg-card border-border">
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold">Correlation ID</span>
+              <p className="text-xs text-primary font-bold truncate mt-1">{selectedRun.correlationId}</p>
+            </Card>
+            <Card className="p-4 font-mono shadow-xs bg-card border-border">
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold">Execution Status</span>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-bold mt-1">{selectedRun.status}</p>
+            </Card>
+            <Card className="p-4 font-mono shadow-xs bg-card border-border">
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold">Active Model</span>
+              <p className="text-xs text-primary font-bold truncate mt-1">{activeModelDisplay}</p>
+            </Card>
+            <Card className="p-4 font-mono shadow-xs bg-card border-border">
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold">Total Tokens / Cost</span>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-bold mt-1">
+                {usage.reduce((acc, u) => acc + (u.totalTokens || 0), 0)} tok / $
+                {usage.reduce((acc, u) => acc + (u.costUsd || 0), 0).toFixed(5)}
               </p>
-            </div>
+            </Card>
           </div>
 
           {/* User Query Banner */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-4 font-sans text-xs">
-            <span className="font-mono text-[10px] text-slate-400 uppercase font-semibold">User Query:</span>
-            <p className="text-slate-100 font-medium text-sm mt-1">&quot;{selectedRun.query}&quot;</p>
-          </div>
+          <Card className="p-4 font-sans text-xs shadow-xs bg-muted/30 border-border">
+            <span className="font-mono text-[10px] text-muted-foreground uppercase font-semibold">User Query:</span>
+            <p className="text-foreground font-medium text-sm mt-1">&quot;{selectedRun.query}&quot;</p>
+          </Card>
 
           {/* Waterfall Steps Timeline */}
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5">
-            <h3 className="text-sm font-bold text-white font-mono mb-4 flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-sky-400" />
-                EXECUTION SPAN WATERFALL ({steps.length} SPANS)
-              </span>
-              <span className="text-xs font-normal text-slate-400">Click any span to inspect payload</span>
+          <Card className="p-5 shadow-sm bg-card border-border">
+            <h3 className="text-sm font-bold text-foreground font-mono mb-4 flex items-center justify-between">
+              <span>EXECUTION SPAN WATERFALL ({steps.length} SPANS)</span>
+              <span className="text-xs font-normal text-muted-foreground">Click any span to inspect payload</span>
             </h3>
 
             <div className="space-y-2">
@@ -148,130 +146,125 @@ export default function RunTracePage() {
                     onClick={() => setSelectedStep(step)}
                     className={`p-3 rounded-lg border flex items-center justify-between text-xs font-mono cursor-pointer transition-all ${
                       isSelected
-                        ? "bg-slate-800 border-sky-500 shadow-md"
-                        : "bg-slate-950/60 border-slate-800/80 hover:bg-slate-800/40"
+                        ? "bg-primary/5 border-primary shadow-xs ring-1 ring-primary/20"
+                        : "bg-background border-border hover:bg-muted/50"
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <span className="w-6 h-6 rounded bg-slate-800 text-sky-400 flex items-center justify-center font-bold text-[11px]">
+                      <span className="w-6 h-6 rounded bg-muted text-primary flex items-center justify-center font-bold text-[11px]">
                         {idx + 1}
                       </span>
                       <div>
-                        <p className="font-semibold text-white">{step.agent || step.stepType}</p>
-                        <p className="text-[10px] text-slate-500">SPAN TYPE: {step.stepType}</p>
+                        <p className="font-semibold text-foreground">{step.agent || step.stepType}</p>
+                        <p className="text-[10px] text-muted-foreground">SPAN TYPE: {step.stepType}</p>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-4">
-                      <span className="text-[11px] text-slate-400">
+                      <span className="text-[11px] text-muted-foreground">
                         {step.latencyMs ? `${step.latencyMs}ms` : "< 50ms"}
                       </span>
-                      <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px]">
+                      <Badge variant="success" className="text-[10px]">
                         {step.status}
-                      </span>
+                      </Badge>
                     </div>
                   </div>
                 );
               })}
             </div>
-          </div>
+          </Card>
 
-          {/* RETRIEVAL DEBUG INSPECTOR (RET-005) */}
+          {/* RETRIEVAL DEBUG INSPECTOR */}
           {retrievalTrace && (
-            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+            <Card className="p-5 space-y-6 shadow-sm bg-card border-border">
+              <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-border pb-4 gap-2">
                 <div>
-                  <h3 className="text-sm font-bold text-white font-mono flex items-center gap-2">
-                    <Database className="w-4 h-4 text-emerald-400" />
+                  <h3 className="text-sm font-bold text-foreground font-mono">
                     RETRIEVAL DEBUG INSPECTOR
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <p className="text-xs text-muted-foreground mt-0.5">
                     Deterministic Reciprocal Rank Fusion (RRF) breakdown with dual-channel candidate scoring
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2 font-mono text-xs">
-                  <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                  <Badge variant="outline" className="text-muted-foreground">
                     Formula: {retrievalTrace.fusionFormula || "RRF(k=60)"}
-                  </span>
-                  <span
-                    className={`px-2.5 py-1 rounded font-bold ${
-                      retrievalTrace.refusalDecision === "REFUSED"
-                        ? "bg-rose-500/10 text-rose-400 border border-rose-500/30"
-                        : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                    }`}
+                  </Badge>
+                  <Badge
+                    variant={retrievalTrace.refusalDecision === "REFUSED" ? "destructive" : "success"}
+                    className="font-bold"
                   >
                     GATE: {retrievalTrace.refusalDecision || "PROCEED"} (Score: {retrievalTrace.evidenceScore})
-                  </span>
+                  </Badge>
                 </div>
               </div>
 
-              {/* Applied Filters Card (RET-002) */}
-              <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono">
-                <div className="flex items-center gap-2 text-slate-400 mb-1.5 font-bold">
-                  <Filter className="w-3.5 h-3.5 text-sky-400" />
-                  <span>APPLIED METADATA FILTERS:</span>
+              {/* Applied Filters Card */}
+              <div className="p-3.5 rounded-lg bg-muted/40 border border-border text-xs font-mono">
+                <div className="text-muted-foreground mb-1.5 font-bold">
+                  APPLIED METADATA FILTERS:
                 </div>
                 <div className="flex flex-wrap gap-2 text-[11px]">
                   {retrievalTrace.appliedFilters && Object.keys(retrievalTrace.appliedFilters).length > 0 ? (
                     Object.entries(retrievalTrace.appliedFilters).map(([k, v]) => (
-                      <span key={k} className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                        {k}: <strong>{String(v)}</strong>
-                      </span>
+                      <Badge key={k} variant="secondary" className="font-mono">
+                        {k}: <strong className="ml-1 text-foreground">{String(v)}</strong>
+                      </Badge>
                     ))
                   ) : (
-                    <span className="text-slate-500">None (Full Corpus Active Version Scope)</span>
+                    <span className="text-muted-foreground">None (Full Corpus Active Version Scope)</span>
                   )}
-                  <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  <Badge variant="success" className="font-mono">
                     Active Versions Only: <strong>TRUE</strong>
-                  </span>
+                  </Badge>
                 </div>
               </div>
 
               {/* Dual Channel Candidate Tables */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Dense Channel */}
-                <div className="p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-3">
-                  <h4 className="text-xs font-bold text-sky-400 font-mono flex items-center justify-between">
+                <div className="p-4 rounded-lg bg-muted/20 border border-border space-y-3">
+                  <h4 className="text-xs font-bold text-primary font-mono flex items-center justify-between">
                     <span>1. DENSE PGVECTOR CHANNEL (Top-K)</span>
-                    <span className="text-[10px] text-slate-500">&lt;=&gt; Cosine Distance</span>
+                    <span className="text-[10px] text-muted-foreground">&lt;=&gt; Cosine Distance</span>
                   </h4>
                   <div className="space-y-2">
                     {retrievalTrace.denseTopK?.map((d: any) => (
-                      <div key={d.chunkId} className="p-2.5 rounded bg-slate-900/80 border border-slate-800 text-[11px] font-mono">
-                        <div className="flex items-center justify-between text-slate-400 mb-1">
-                          <span className="text-sky-300 font-bold">Rank #{d.rank} · {d.chunkId}</span>
-                          <span className="text-emerald-400">Sim: {(d.score * 100).toFixed(1)}%</span>
+                      <div key={d.chunkId} className="p-2.5 rounded bg-card border border-border text-[11px] font-mono shadow-xs">
+                        <div className="flex items-center justify-between text-muted-foreground mb-1">
+                          <span className="text-primary font-bold">Rank #{d.rank} · {d.chunkId}</span>
+                          <span className="text-emerald-600 dark:text-emerald-400">Sim: {(d.score * 100).toFixed(1)}%</span>
                         </div>
-                        <p className="text-slate-300 font-sans text-xs truncate">{d.textSnippet}</p>
+                        <p className="text-foreground font-sans text-xs truncate">{d.textSnippet}</p>
                       </div>
                     ))}
                   </div>
                 </div>
 
                 {/* Keyword Channel */}
-                <div className="p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-3">
-                  <h4 className="text-xs font-bold text-indigo-400 font-mono flex items-center justify-between">
+                <div className="p-4 rounded-lg bg-muted/20 border border-border space-y-3">
+                  <h4 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 font-mono flex items-center justify-between">
                     <span>2. KEYWORD POSTGRESQL FTS (Top-K)</span>
-                    <span className="text-[10px] text-slate-500">ts_rank_cd</span>
+                    <span className="text-[10px] text-muted-foreground">ts_rank_cd</span>
                   </h4>
                   <div className="space-y-2">
                     {retrievalTrace.keywordTopK?.map((k: any) => (
-                      <div key={k.chunkId} className="p-2.5 rounded bg-slate-900/80 border border-slate-800 text-[11px] font-mono">
-                        <div className="flex items-center justify-between text-slate-400 mb-1">
-                          <span className="text-indigo-300 font-bold">Rank #{k.rank} · {k.chunkId}</span>
-                          <span className="text-purple-400">FTS Rank: {(k.score * 100).toFixed(1)}%</span>
+                      <div key={k.chunkId} className="p-2.5 rounded bg-card border border-border text-[11px] font-mono shadow-xs">
+                        <div className="flex items-center justify-between text-muted-foreground mb-1">
+                          <span className="text-indigo-600 dark:text-indigo-400 font-bold">Rank #{k.rank} · {k.chunkId}</span>
+                          <span className="text-purple-600 dark:text-purple-400">FTS Rank: {(k.score * 100).toFixed(1)}%</span>
                         </div>
-                        <p className="text-slate-300 font-sans text-xs truncate">{k.textSnippet}</p>
+                        <p className="text-foreground font-sans text-xs truncate">{k.textSnippet}</p>
                       </div>
                     ))}
                   </div>
                 </div>
               </div>
 
-              {/* Fused Candidates & Explainability (RET-001 & RET-005) */}
+              {/* Fused Candidates & Explainability */}
               <div className="space-y-3">
-                <h4 className="text-xs font-bold text-emerald-400 font-mono">
+                <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono">
                   3. FUSED CANDIDATES &amp; RANK EXPLANABILITY (RRF)
                 </h4>
                 <div className="space-y-2">
@@ -280,147 +273,153 @@ export default function RunTracePage() {
                     return (
                       <div
                         key={f.chunkId}
-                        className={`p-3 rounded-lg border text-xs font-mono space-y-1.5 ${
+                        className={`p-3 rounded-lg border text-xs font-mono space-y-1.5 transition-all ${
                           isSelected
-                            ? "bg-slate-950 border-emerald-500/50 shadow-sm"
-                            : "bg-slate-950/50 border-slate-800 opacity-60"
+                            ? "bg-primary/5 border-emerald-500/50 shadow-xs ring-1 ring-emerald-500/20"
+                            : "bg-card border-border opacity-75"
                         }`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <span className="w-5 h-5 rounded bg-emerald-500/20 text-emerald-300 font-bold flex items-center justify-center text-[10px]">
+                            <span className="w-5 h-5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-bold flex items-center justify-center text-[10px]">
                               {idx + 1}
                             </span>
-                            <span className="font-bold text-white">{f.documentName}</span>
-                            <span className="text-[10px] text-slate-500">v{f.version} · p.{f.page || 1}</span>
+                            <span className="font-bold text-foreground">{f.documentName}</span>
+                            <span className="text-[10px] text-muted-foreground">v{f.version} · p.{f.page || 1}</span>
                           </div>
 
                           <div className="flex items-center gap-2">
                             {isSelected && (
-                              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
+                              <Badge variant="success" className="text-[10px] font-bold">
                                 SELECTED FOR DRAFTING
-                              </span>
+                              </Badge>
                             )}
-                            <span className="px-2 py-0.5 rounded bg-slate-800 text-sky-400 text-[11px] font-bold">
+                            <Badge variant="secondary" className="text-primary font-bold font-mono">
                               RRF: {f.rrfScore}
-                            </span>
+                            </Badge>
                           </div>
                         </div>
 
-                        {/* Explainability Chip (RET-005) */}
-                        <div className="p-2 rounded bg-slate-900 border border-slate-800 text-[11px] text-slate-300 font-mono">
-                          <strong>Scoring Rationale:</strong> {f.explanation}
+                        {/* Explainability Chip */}
+                        <div className="p-2 rounded bg-muted/40 border border-border text-[11px] text-muted-foreground font-mono">
+                          <strong className="text-foreground">Scoring Rationale:</strong> {f.explanation}
                         </div>
                       </div>
                     );
                   })}
                 </div>
               </div>
-            </div>
+            </Card>
           )}
 
-          {/* MANDATORY TWIST RISK GUARD TELEMETRY (TW-005 / TW-006) */}
+          {/* SAFETY TWIST RISK GUARD TELEMETRY */}
           {twistData && (
-            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <Card className="p-5 space-y-4 shadow-sm bg-card border-border">
+              <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-border pb-3 gap-2">
                 <div>
-                  <h3 className="text-sm font-bold text-white font-mono flex items-center gap-2">
-                    <ShieldAlert className="w-4 h-4 text-sky-400" />
+                  <h3 className="text-sm font-bold text-foreground font-mono">
                     SAFETY RISK GUARD TELEMETRY
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Deterministic Side-Effect Risk Guard · Enforces clinical safety risk floor
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Deterministic Side-Effect Risk Guard · Enforces domain safety risk floor
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2 font-mono text-xs">
-                  <span
-                    className={`px-2.5 py-1 rounded font-bold border ${
-                      twistData.isPermitted
-                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                        : "bg-rose-500/10 text-rose-400 border-rose-500/30"
-                    }`}
+                  <Badge
+                    variant={twistData.isPermitted ? "success" : "destructive"}
+                    className="font-bold"
                   >
                     STATUS: {twistData.isPermitted ? "PERMITTED" : "GUARDED / BLOCKED"}
-                  </span>
-                  <span className="px-2.5 py-1 rounded bg-slate-800 text-sky-300 border border-slate-700">
-                    Risk Index: <strong>{twistData.computedRiskIndex}</strong> / Threshold: <strong>{twistData.threshold}</strong>
-                  </span>
+                  </Badge>
+                  <Badge variant="outline" className="text-muted-foreground">
+                    Risk Index: <strong className="text-foreground ml-1">{twistData.computedRiskIndex}</strong> / Threshold:{" "}
+                    <strong className="text-foreground ml-1">{twistData.threshold}</strong>
+                  </Badge>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
-                <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
-                  <span className="text-slate-500 text-[10px] uppercase font-bold">Enforced Domain Policy</span>
-                  <p className="text-slate-300">{twistData.enforcedPolicy || "Zero-tolerance off-label protocol variance"}</p>
+                <div className="p-3 rounded-lg bg-muted/30 border border-border space-y-1">
+                  <span className="text-muted-foreground text-[10px] uppercase font-bold">Enforced Domain Policy</span>
+                  <p className="text-foreground">{twistData.enforcedPolicy || "Zero-tolerance off-label protocol variance"}</p>
                 </div>
-                <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
-                  <span className="text-slate-500 text-[10px] uppercase font-bold">Execution Step</span>
-                  <p className="text-slate-300 font-semibold">{twistStep?.agent || "Mandatory Twist Guard"}</p>
+                <div className="p-3 rounded-lg bg-muted/30 border border-border space-y-1">
+                  <span className="text-muted-foreground text-[10px] uppercase font-bold">Execution Step</span>
+                  <p className="text-foreground font-semibold">{twistStep?.agent || "Mandatory Twist Guard"}</p>
                 </div>
               </div>
 
               {twistData.violations && twistData.violations.length > 0 && (
-                <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs font-mono space-y-1">
-                  <span className="text-rose-400 font-bold flex items-center gap-1.5">
-                    <ShieldAlert className="w-3.5 h-3.5" />
+                <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-xs font-mono space-y-1">
+                  <span className="text-destructive font-bold flex items-center gap-1.5">
+                    <AppIcons.warning className="w-3.5 h-3.5" />
                     Risk Violations Detected:
                   </span>
-                  <ul className="list-disc list-inside space-y-0.5 text-rose-300">
+                  <ul className="list-disc list-inside space-y-0.5 text-destructive/90">
                     {twistData.violations.map((v: string, i: number) => (
                       <li key={i}>{v}</li>
                     ))}
                   </ul>
                 </div>
               )}
-            </div>
+            </Card>
           )}
 
-          {/* Token & Cost Breakdown Panel (Part 3 Section 4) */}
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5">
-            <h3 className="text-sm font-bold text-white font-mono mb-4 flex items-center gap-2">
-              <DollarSign className="w-4 h-4 text-emerald-400" />
+          {/* Token & Cost Breakdown Panel */}
+          <Card className="p-5 shadow-sm bg-card border-border">
+            <h3 className="text-sm font-bold text-foreground font-mono mb-4">
               PER-CALL TOKEN USAGE &amp; COST ACCOUNTING
             </h3>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs font-mono">
-                <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] border-b border-slate-800">
-                  <tr>
-                    <th className="py-2.5 px-4">Provider / Model</th>
-                    <th className="py-2.5 px-4">Call Type</th>
-                    <th className="py-2.5 px-4">Prompt Tokens</th>
-                    <th className="py-2.5 px-4">Completion Tokens</th>
-                    <th className="py-2.5 px-4">Total Tokens</th>
-                    <th className="py-2.5 px-4 text-right">Cost (USD)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800 text-slate-300">
-                  {usage.map((u) => (
-                    <tr key={u.id} className="hover:bg-slate-800/40">
-                      <td className="py-2.5 px-4 font-bold text-sky-400">{u.provider} / {u.model}</td>
-                      <td className="py-2.5 px-4">{u.callType}</td>
-                      <td className="py-2.5 px-4">{u.promptTokens}</td>
-                      <td className="py-2.5 px-4">{u.completionTokens}</td>
-                      <td className="py-2.5 px-4 font-semibold text-white">{u.totalTokens}</td>
-                      <td className="py-2.5 px-4 text-right font-bold text-emerald-400">
-                        ${Number(u.costUsd || 0).toFixed(5)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="rounded-md border border-border overflow-hidden">
+              <Table>
+                <TableHeader className="bg-muted/50 font-mono text-[10px] uppercase">
+                  <TableRow>
+                    <TableHead className="py-2.5 px-4">Provider / Model</TableHead>
+                    <TableHead className="py-2.5 px-4">Call Type</TableHead>
+                    <TableHead className="py-2.5 px-4">Prompt Tokens</TableHead>
+                    <TableHead className="py-2.5 px-4">Completion Tokens</TableHead>
+                    <TableHead className="py-2.5 px-4">Total Tokens</TableHead>
+                    <TableHead className="py-2.5 px-4 text-right">Cost (USD)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className="text-xs font-mono">
+                  {usage.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-6 text-muted-foreground">
+                        No usage data recorded for this run.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    usage.map((u) => (
+                      <TableRow key={u.id} className="hover:bg-muted/30">
+                        <TableCell className="py-2.5 px-4 font-bold text-primary">
+                          {u.provider} / {u.model}
+                        </TableCell>
+                        <TableCell className="py-2.5 px-4 text-muted-foreground">{u.callType}</TableCell>
+                        <TableCell className="py-2.5 px-4">{u.promptTokens}</TableCell>
+                        <TableCell className="py-2.5 px-4">{u.completionTokens}</TableCell>
+                        <TableCell className="py-2.5 px-4 font-semibold text-foreground">{u.totalTokens}</TableCell>
+                        <TableCell className="py-2.5 px-4 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                          ${Number(u.costUsd || 0).toFixed(5)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
-          </div>
+          </Card>
         </div>
       ) : (
-        <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-12 text-center text-slate-500 text-xs">
-          <Activity className="w-8 h-8 mx-auto mb-2 text-sky-400 opacity-40" />
-          <p className="font-medium text-slate-400">Select a run from the history or submit a query on Copilot</p>
-          <p className="text-[10px] mt-1 text-slate-600">
+        <Card className="p-12 text-center text-muted-foreground text-xs bg-muted/20 border-dashed border-border shadow-xs">
+          <AppIcons.runs className="w-8 h-8 mx-auto mb-2 text-primary opacity-60" />
+          <p className="font-medium text-foreground">Select a run from the history or submit a query on Copilot</p>
+          <p className="text-[11px] mt-1 text-muted-foreground">
             Traces visualize dense candidates, FTS candidates, RRF fusion, and per-token pricing.
           </p>
-        </div>
+        </Card>
       )}
     </div>
   );

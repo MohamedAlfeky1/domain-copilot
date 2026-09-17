@@ -2,54 +2,80 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+    --radius: 0.5rem;
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-sans);
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+  }
 }
 
-body {
-  background-color: #0B1120;
-  color: #F8FAFC;
-  font-family: var(--font-sans);
-  margin: 0;
-  padding: 0;
-  -webkit-font-smoothing: antialiased;
-}
-
-/* Custom scrollbar for data tables and drawer */
+/* Light Mode Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0F172A;
+  background: #F1F5F9;
 }
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #CBD5E1;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #94A3B8;
 }
 
-/* Technical & Acceptance panels */
+/* Technical & Acceptance panels - light theme */
 .panel-technical {
-  background-color: rgba(14, 165, 233, 0.08);
-  border: 1px solid rgba(56, 189, 248, 0.25);
+  background-color: rgba(14, 165, 233, 0.05);
+  border: 1px solid rgba(56, 189, 248, 0.35);
 }
 
 .panel-acceptance {
-  background-color: rgba(16, 185, 129, 0.08);
-  border: 1px solid rgba(52, 211, 153, 0.25);
+  background-color: rgba(16, 185, 129, 0.05);
+  border: 1px solid rgba(52, 211, 153, 0.35);
 }
 
 .panel-warning {
-  background-color: rgba(245, 158, 11, 0.08);
-  border: 1px solid rgba(251, 191, 36, 0.25);
+  background-color: rgba(245, 158, 11, 0.05);
+  border: 1px solid rgba(251, 191, 36, 0.35);
 }
 
 .panel-danger {
-  background-color: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(248, 113, 113, 0.25);
+  background-color: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(248, 113, 113, 0.35);
 }
 
 /* T1 Bilingual: RTL and Bi-directional Text Support */
@@ -67,4 +93,3 @@ body {
 .rtl-flip {
   transform: scaleX(-1);
 }
-
