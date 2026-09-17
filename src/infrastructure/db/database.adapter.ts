@@ -641,6 +641,14 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   }
 
   // --- Vector Store Operations ---
+  getCorpusEmbeddingModel(): string | null {
+    if (this.embeddings.size > 0) {
+      const first = this.embeddings.values().next().value;
+      return first?.model || null;
+    }
+    return null;
+  }
+
   async saveEmbedding(embedding: ChunkEmbedding): Promise<void> {
     this.embeddings.set(embedding.chunkId, embedding);
     this.scheduleDiskPersist();
@@ -650,7 +658,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
         await this.pg!.query(
           `INSERT INTO chunk_embeddings (id, chunk_id, model, dimension, vector, created_at)
            VALUES ($1, $2, $3, $4, $5::vector, $6)
-           ON CONFLICT (id) DO UPDATE SET vector = EXCLUDED.vector;`,
+           ON CONFLICT (id) DO UPDATE SET vector = EXCLUDED.vector, model = EXCLUDED.model, dimension = EXCLUDED.dimension;`,
           [embedding.id, embedding.chunkId, embedding.model, embedding.dimension, vecStr, embedding.createdAt]
         );
       } catch (e) {
@@ -662,6 +670,45 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   async saveBatchEmbeddings(newEmbeddings: ChunkEmbedding[]): Promise<void> {
     for (const e of newEmbeddings) {
       await this.saveEmbedding(e);
+    }
+  }
+
+  async replaceActiveEmbeddings(newEmbeddings: ChunkEmbedding[], targetModel?: string): Promise<void> {
+    this.embeddings.clear();
+    for (const e of newEmbeddings) {
+      this.embeddings.set(e.chunkId, e);
+    }
+    this.saveToDisk();
+
+    if (await this.ensurePgReady()) {
+      try {
+        await this.pg!.query("BEGIN;");
+        await this.pg!.query("DELETE FROM chunk_embeddings;");
+
+        const batchSize = 50;
+        for (let i = 0; i < newEmbeddings.length; i += batchSize) {
+          const slice = newEmbeddings.slice(i, i + batchSize);
+          const valuesClauses: string[] = [];
+          const params: any[] = [];
+          let pIdx = 1;
+
+          for (const emb of slice) {
+            const vecStr = `[${emb.vector.join(",")}]`;
+            valuesClauses.push(`($${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}::vector, $${pIdx++})`);
+            params.push(emb.id, emb.chunkId, emb.model, emb.dimension, vecStr, emb.createdAt);
+          }
+
+          const sql = `INSERT INTO chunk_embeddings (id, chunk_id, model, dimension, vector, created_at) VALUES ${valuesClauses.join(", ")};`;
+          await this.pg!.query(sql, params);
+        }
+
+        await this.pg!.query("COMMIT;");
+      } catch (err) {
+        try {
+          await this.pg!.query("ROLLBACK;");
+        } catch {}
+        console.warn("PGlite replaceActiveEmbeddings notice (in-memory state preserved):", err);
+      }
     }
   }
 

@@ -20,6 +20,8 @@
     "test:provider": "node scripts/test-ai-provider-factory.js",
     "test:openrouter": "node scripts/test-openrouter-adapter.js",
     "test:gemini": "node scripts/test-gemini-embedding.js",
+    "test:reindex": "node scripts/test-reindex-gemini.js",
+    "reindex:gemini": "node scripts/reindex-gemini.js",
     "test:security": "node scripts/test-security.js",
     "test:corpus": "node scripts/test-corpus.js",
     "eval": "node scripts/eval-runner.js",

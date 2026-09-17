@@ -3,7 +3,7 @@
  * Implements IAIProviderPort (IEmbeddingProviderPort) using Google Gemini Embedding API.
  *
  * Capabilities:
- * - Gemini Embedding 001 model support ('models/embedding-001' or 'embedding-001').
+ * - Gemini Embedding 001 model support ('models/gemini-embedding-001' or 'gemini-embedding-001').
  * - Fixed 1536 output dimensions matching pgvector database schema.
  * - Explicit task types: RETRIEVAL_QUERY for search queries, RETRIEVAL_DOCUMENT for stored chunks.
  * - L2 vector normalization (unit Euclidean norm) for numerical precision with cosine distance.
@@ -77,7 +77,7 @@ export class GeminiEmbeddingAdapter implements IAIProviderPort {
   constructor(config?: GeminiEmbeddingConfig, customTransport?: GeminiEmbeddingTransport) {
     this.apiKey = config?.apiKey || process.env.GEMINI_API_KEY;
     this.baseUrl = config?.baseUrl || "https://generativelanguage.googleapis.com/v1beta";
-    const rawModel = config?.model || process.env.GEMINI_EMBEDDING_MODEL || "models/embedding-001";
+    const rawModel = config?.model || process.env.GEMINI_EMBEDDING_MODEL || "models/gemini-embedding-001";
     this.defaultModel = this.normalizeModelName(rawModel);
     this.requiredDimension = config?.dimension || 1536;
     this.customTransport = customTransport;
@@ -140,19 +140,7 @@ export class GeminiEmbeddingAdapter implements IAIProviderPort {
         outputDimensionality: this.requiredDimension,
       };
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => ({}));
-        const message = errBody?.error?.message || response.statusText;
-        throw { status: response.status, message, body: errBody };
-      }
-
-      const raw = await response.json();
+      const raw = await this.postJsonWithRetry(url, payload);
       return this.processSingleEmbeddingResponse(raw, model);
     } catch (err: any) {
       throw this.mapError(err, model);
@@ -204,19 +192,7 @@ export class GeminiEmbeddingAdapter implements IAIProviderPort {
         outputDimensionality: this.requiredDimension,
       }));
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requests }),
-      });
-
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => ({}));
-        const message = errBody?.error?.message || response.statusText;
-        throw { status: response.status, message, body: errBody };
-      }
-
-      const raw = await response.json();
+      const raw = await this.postJsonWithRetry(url, { requests });
       return this.processBatchEmbeddingResponse(raw, model, texts.length);
     } catch (err: any) {
       throw this.mapError(err, model);
@@ -319,12 +295,53 @@ export class GeminiEmbeddingAdapter implements IAIProviderPort {
     return trimmed;
   }
 
+  private async postJsonWithRetry(url: string, payload: unknown): Promise<any> {
+    const maxAttempts = 5;
+    let lastError: any;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (response.ok) {
+          return await response.json();
+        }
+
+        const errBody = await response.json().catch(() => ({}));
+        const error = {
+          status: response.status,
+          message: errBody?.error?.message || response.statusText,
+          body: errBody,
+        };
+        if (response.status !== 429 && response.status < 500) {
+          throw error;
+        }
+        lastError = error;
+      } catch (error: any) {
+        if (error?.status && error.status !== 429 && error.status < 500) {
+          throw error;
+        }
+        lastError = error;
+      }
+
+      if (attempt < maxAttempts - 1) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+      }
+    }
+
+    throw lastError;
+  }
+
   private validateModel(model: string): void {
     const normalized = model.toLowerCase();
-    // Allow models/embedding-001, models/text-embedding-004, models/text-embedding-001
+    // Allow Gemini embedding model identifiers.
     if (!normalized.includes("embed")) {
       throw new ConfigurationError(
-        `Invalid Gemini embedding model: '${model}'. Model must be a designated embedding model such as 'models/embedding-001'.`
+        `Invalid Gemini embedding model: '${model}'. Model must be a designated embedding model such as 'models/gemini-embedding-001'.`
       );
     }
   }
