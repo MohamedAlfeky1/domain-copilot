@@ -1,0 +1,58 @@
+# Clinical Protocol: Acute Respiratory Failure & Cardiovascular Emergency Care
+
+## Category: Critical Care & Cardiology · Emergency Pathway v1.0
+
+### Section 1: Clinical Indication, Classification & Triage
+This protocol provides standardized emergency guidelines for patients presenting with Acute Respiratory Failure (الفشل التنفسي الحاد) and Acute Coronary Syndromes (متلازمة الشريان التاجي الحادة):
+1. Respiratory Failure Classification:
+   - Type 1 (Hypoxemic Respiratory Failure): Arterial oxygen tension (PaO2) < 60 mmHg on ambient room air with normal or low arterial carbon dioxide tension (PaCO2). Typical etiologies include ARDS, severe pneumonia, pulmonary embolism, and cardiogenic pulmonary edema.
+   - Type 2 (Hypercapnic Respiratory Failure): PaCO2 > 50 mmHg with acute respiratory acidemia (arterial pH < 7.35). Etiologies include COPD exacerbation, neuromuscular weakness, and central respiratory depression.
+2. Acute Coronary Syndrome (ACS) Spectrum:
+   - ST-Elevation Myocardial Infarction (STEMI): Persistent ST-segment elevation >= 1 mm in >= 2 contiguous leads (or new LBBB) with positive cardiac biomarkers indicating transmural myocardial necrosis.
+   - Non-ST-Elevation ACS (NSTEMI and Unstable Angina): Ischemic symptoms with ST depression, T-wave inversion, or positive troponins without ST elevation.
+
+### Section 2: Clinical Assessment & Diagnostic Criteria
+1. Cardinal Respiratory Symptoms and Physical Findings:
+   - Severe dyspnea, tachypnea (respiratory rate > 30 breaths/min), intercostal retractions, suprasternal tugging, abdominal paradoxical breathing, audible wheezing or crackles, central cyanosis, and SpO2 < 90% on room air.
+2. Cardinal Cardiovascular Symptoms and Physical Findings:
+   - Substernal crushing or squeezing chest pain/pressure lasting > 20 minutes (ألم الصدر الضاغط الحاد), radiating to left shoulder, arm, neck, or lower jaw.
+   - Associated neurovegetative symptoms: Diaphoresis (تعرق غزير), nausea, vomiting, dizziness, lightheadedness, and profound sense of impending doom.
+   - Physical signs of hemodynamic instability: Hypotension (systolic BP < 90 mmHg), cool clammy extremities, jugular venous distension, and third heart sound (S3 gallop).
+3. Immediate Diagnostic Bundle (Within 10 Minutes):
+   - 12-lead Electrocardiogram (ECG) performed and interpreted within 10 minutes.
+   - High-sensitivity cardiac troponin I or T (hs-cTn) drawn immediately, repeated at 1-3 hours.
+   - Arterial Blood Gas (ABG) analysis to assess PaO2, PaCO2, pH, and lactate.
+   - Portable bedside chest radiography and focused point-of-care echocardiography (POCUS).
+
+### Section 3: Respiratory Oxygenation & Ventilation Strategies
+1. Controlled Oxygen Therapy:
+   - Initiate supplemental oxygen via nasal cannula or Venturi mask to maintain target SpO2 94% to 98% in most patients.
+   - In patients with known COPD, chronic hypercapnia, or risk factors for carbon dioxide retention, maintain a strictly controlled target SpO2 of 88% to 92% to avoid blunting hypoxic respiratory drive.
+2. High-Flow Nasal Cannula (HFNC):
+   - Consider for acute hypoxemic respiratory failure without severe hypercapnia. Initial flow 30–50 L/min, FiO2 titrated to SpO2 >= 92%.
+3. Non-Invasive Positive Pressure Ventilation (NIV / BiPAP) (التهوية غير الغازية):
+   - First-line ventilatory support in acute cardiogenic pulmonary edema and acute hypercapnic COPD exacerbations.
+   - Initial settings: Inspiratory Positive Airway Pressure (IPAP) 10–12 cmH2O, Expiratory Positive Airway Pressure (EPAP) 4–5 cmH2O. Titrate IPAP up to 18 cmH2O to alleviate work of breathing and correct hypercapnia.
+   - Contraindications: Cardiac or respiratory arrest, severe hemodynamic collapse, altered consciousness, high aspiration risk, facial trauma, or inability to clear secretions.
+4. Invasive Mechanical Ventilation:
+   - Indications: Refractory hypoxemia (PaO2/FiO2 ratio < 150 despite NIV/HFNC), severe exhaustion with impending arrest, severe respiratory acidosis (pH < 7.20), or Glasgow Coma Scale < 8.
+   - Lung-Protective Ventilation Strategy: Low tidal volume ventilation set at 6 mL/kg of predicted body weight (PBW), maintain plateau pressure (Pplat) <= 30 cmH2O, titrate PEEP according to ARDSNet tables, and permissive hypercapnia.
+
+### Section 4: Acute Coronary Syndrome Immediate Medical Bundle
+For all patients with suspected or confirmed ACS, initiate the emergency management bundle immediately:
+1. Antiplatelet Loading:
+   - Aspirin (أسبرين): 162 mg to 325 mg non-enteric chewable tablet administered immediately to ensure rapid buccal absorption.
+   - P2Y12 Platelet Receptor Inhibitor: Ticagrelor 180 mg loading dose (or Clopidogrel 300 to 600 mg loading dose if Ticagrelor contraindicated).
+2. Anti-Ischemic Therapy:
+   - Sublingual Nitroglycerin (نتروجليسرين): 0.4 mg tablet or spray every 5 minutes up to 3 doses for persistent ischemic chest pain.
+   - Absolute Contraindications to Nitroglycerin: Systolic blood pressure < 90 mmHg, heart rate < 50 bpm or > 100 bpm, suspected right ventricular infarction (ST elevation in V4R), or recent use of phosphodiesterase-5 inhibitors (sildenafil within 24 hours, tadalafil within 48 hours).
+3. Parenteral Anticoagulation:
+   - Unfractionated Heparin (UFH) initial IV bolus 60 units/kg (maximum 4,000 units), followed by continuous infusion of 12 units/kg/hr (maximum 1,000 units/hr), titrated to target activated partial thromboplastin time (aPTT) 50 to 70 seconds.
+   - Alternative: Low-Molecular-Weight Heparin (Enoxaparin 1 mg/kg subcutaneous every 12 hours).
+4. Reperfusion Strategy in STEMI:
+   - Primary Percutaneous Coronary Intervention (PCI) is the preferred reperfusion strategy when door-to-balloon time is under 90 minutes.
+   - Fibrinolytic therapy (Tenecteplase) within 30 minutes of medical contact if PCI cannot be performed within 120 minutes.
+
+### Section 5: Hemodynamic Monitoring & Step-Down Safety
+1. Intensive Monitoring: Continuous cardiac telemetry, non-invasive or arterial line blood pressure monitoring, serial lactate, and urine output measurements (> 0.5 mL/kg/hr).
+2. Vasopressor and Inotropic Support: In cardiogenic shock, Norepinephrine is the first-line vasopressor to restore mean arterial pressure > 65 mmHg; Dobutamine may be added for low cardiac output with adequate blood pressure.

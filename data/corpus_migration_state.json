@@ -1,0 +1,11 @@
+{
+  "provider": "gemini",
+  "model": "models/gemini-embedding-001",
+  "dimension": 1536,
+  "totalDocuments": 41,
+  "totalChunks": 701,
+  "succeeded": 701,
+  "failed": 0,
+  "migratedAt": "2026-09-18T13:29:21.734Z",
+  "status": "COMPLETED"
+}

@@ -8,14 +8,17 @@ import { Document, DocumentVersion, Chunk, IngestionJob, IngestionStage } from "
 import { IDatabasePort } from "../ports/database.port";
 import { IVectorStorePort } from "../ports/vector-store.port";
 import { IAIProviderPort } from "../ports/ai-provider.port";
-import { IngestionFailedError } from "../../domain/errors";
+import { IOCRPort } from "../ports/ocr.port";
+import { IngestionFailedError, ExtractionQualityError } from "../../domain/errors";
 import { DeterministicCleaner, ExtractorRegistry, ExtractionResult } from "./extraction";
+import { PdfQualityGate } from "./quality-gate";
 
 export interface IngestionInput {
   filename: string;
   mimeType: string;
   buffer: Buffer;
   source?: string;
+  ownerId?: string;
 }
 
 const STAGE_PROGRESS: Record<IngestionStage, number> = {
@@ -29,12 +32,18 @@ const STAGE_PROGRESS: Record<IngestionStage, number> = {
 export class IngestionService {
   private readonly extractors = new ExtractorRegistry();
   private readonly cleaner = new DeterministicCleaner();
+  private readonly qualityGate = new PdfQualityGate();
 
   constructor(
     private db: IDatabasePort,
     private vectorStore: IVectorStorePort,
-    private aiProvider: IAIProviderPort
+    private aiProvider: IAIProviderPort,
+    private ocrPort?: IOCRPort
   ) {}
+
+  setOcrPort(port: IOCRPort | undefined): void {
+    this.ocrPort = port;
+  }
 
   async ingestDocument(input: IngestionInput): Promise<{ document: Document; version: DocumentVersion; job: IngestionJob; duplicate: boolean }> {
     const source = input.source || input.filename;
@@ -63,7 +72,7 @@ export class IngestionService {
       await this.db.saveDocument(doc);
       version = activeVersion?.contentHash === contentHash
         ? activeVersion
-        : await this.createVersion(doc, contentHash, 1 + (activeVersion?.version || 0), input.buffer);
+        : await this.createVersion(doc, contentHash, 1 + (activeVersion?.version || 0));
     } else {
       const sourceKey = createHash("sha256").update(`${source}\u0000${input.filename}`).digest("hex");
       doc = await this.db.saveDocument({
@@ -74,9 +83,10 @@ export class IngestionService {
         sizeBytes: input.buffer.length,
         contentHash,
         status: "QUEUED",
+        ownerId: input.ownerId,
         createdAt: new Date().toISOString(),
       });
-      version = await this.createVersion(doc, contentHash, 1, input.buffer);
+      version = await this.createVersion(doc, contentHash, 1);
     }
 
     doc = { ...doc, currentVersionId: version.id };
@@ -96,11 +106,108 @@ export class IngestionService {
       doc.status = "PROCESSING";
       await this.db.saveDocument(doc);
 
-      const extracted = await this.runStage(job, "EXTRACT", () => this.extractors.extract(input.filename, input.mimeType, input.buffer));
-      version = { ...version, pages: extracted.pages.length };
+      let extracted: ExtractionResult;
+      let usedOcr = false;
+      const isPdf = input.mimeType === "application/pdf" || /\.pdf$/i.test(input.filename);
+
+      if (isPdf) {
+        let normalExtracted: ExtractionResult | null = null;
+        let normalExtractionError: Error | null = null;
+
+        try {
+          normalExtracted = await this.runStage(job, "EXTRACT", () =>
+            this.extractors.extract(input.filename, input.mimeType, input.buffer)
+          );
+        } catch (err) {
+          normalExtractionError = err instanceof Error ? err : new Error(String(err));
+        }
+
+        const normalQualityReport = normalExtracted
+          ? this.qualityGate.evaluate(normalExtracted)
+          : null;
+
+        if (normalExtracted && normalQualityReport && normalQualityReport.usable) {
+          // Normal extraction succeeded and passed Quality Gate
+          extracted = normalExtracted;
+          if (normalQualityReport.detectedLanguage === "ar" || normalQualityReport.detectedLanguage === "bilingual") {
+            version.language = "ar";
+          } else if (normalQualityReport.detectedLanguage === "en") {
+            version.language = "en";
+          }
+        } else {
+          // Normal extraction was unusable or failed (e.g. scanned image-only PDF).
+          // Fallback to OCR if available.
+          const ocrAvailable = this.ocrPort ? await this.ocrPort.isAvailable() : false;
+          if (!ocrAvailable) {
+            if (normalQualityReport) {
+              const reasonSummary = normalQualityReport.reasons.join(" ");
+              throw new ExtractionQualityError(
+                `PDF extraction quality check failed (score: ${normalQualityReport.score.toFixed(2)}). ${reasonSummary} OCR fallback is not available or disabled.`
+              );
+            }
+            throw normalExtractionError || new ExtractionQualityError("PDF extraction failed and OCR fallback is not available.");
+          }
+
+          const languageHint = normalQualityReport?.detectedLanguage !== "unknown"
+            ? normalQualityReport?.detectedLanguage
+            : undefined;
+
+          let ocrResult: ExtractionResult;
+          try {
+            ocrResult = await this.ocrPort!.extractText({
+              filename: input.filename,
+              buffer: input.buffer,
+              languageHint,
+            });
+          } catch (ocrErr: unknown) {
+            const msg = ocrErr instanceof Error ? ocrErr.message : "OCR processing failed";
+            throw new ExtractionQualityError(`PDF OCR fallback failed during processing: ${msg}`);
+          }
+
+          // Quality handling: run the same Quality Gate again on OCR output
+          const ocrQualityReport = this.qualityGate.evaluate(ocrResult);
+          if (!ocrQualityReport.usable) {
+            const reasonSummary = ocrQualityReport.reasons.join(" ");
+            throw new ExtractionQualityError(
+              `PDF OCR fallback quality check failed (score: ${ocrQualityReport.score.toFixed(2)}). ${reasonSummary} OCR text is unusable. Please ensure the document is clear and legible.`
+            );
+          }
+
+          extracted = {
+            ...ocrResult,
+            extractionMethod: "ocr",
+          };
+          usedOcr = true;
+
+          if (ocrQualityReport.detectedLanguage === "ar" || ocrQualityReport.detectedLanguage === "bilingual") {
+            version.language = "ar";
+          } else if (ocrQualityReport.detectedLanguage === "en") {
+            version.language = "en";
+          }
+        }
+      } else {
+        // Non-PDF post-extraction language evaluation
+        extracted = await this.runStage(job, "EXTRACT", () =>
+          this.extractors.extract(input.filename, input.mimeType, input.buffer)
+        );
+        const arabicChars = (extracted.text.match(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g) || []).length;
+        const latinChars = (extracted.text.match(/[a-zA-Z]/g) || []).length;
+        const totalAlpha = arabicChars + latinChars;
+        if (totalAlpha > 0 && arabicChars / totalAlpha >= 0.5) {
+          version.language = "ar";
+        }
+      }
+
+      version = {
+        ...version,
+        pages: extracted.pages.length,
+        extractionMethod: usedOcr ? "ocr" : "normal",
+      };
       await this.db.saveDocumentVersion(version);
       const cleaned = await this.runStage(job, "CLEAN", () => this.cleaner.clean(extracted));
-      const chunks = await this.runStage(job, "CHUNK", () => this.chunkStage(cleaned.pages, version.id, doc.name, contentHash));
+      const chunks = await this.runStage(job, "CHUNK", () =>
+        this.chunkStage(cleaned.pages, version.id, doc.name, contentHash, usedOcr ? "ocr" : "normal")
+      );
       await this.db.saveChunks(chunks);
       const embeddings = await this.runStage(job, "EMBED", () => this.aiProvider.generateBatchEmbeddings(chunks.map((chunk) => chunk.text)));
       await this.runStage(job, "INDEX", async () => {
@@ -129,24 +236,13 @@ export class IngestionService {
     }
   }
 
-  private async createVersion(document: Document, contentHash: string, versionNumber: number, buffer?: Buffer): Promise<DocumentVersion> {
-    // T1 Bilingual: Auto-detect document language from content
-    let language = "en";
-    if (buffer) {
-      const sampleText = buffer.toString("utf-8", 0, Math.min(buffer.length, 2000));
-      const arabicChars = (sampleText.match(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g) || []).length;
-      const latinChars = (sampleText.match(/[a-zA-Z]/g) || []).length;
-      const totalAlpha = arabicChars + latinChars;
-      if (totalAlpha > 0 && arabicChars / totalAlpha >= 0.5) {
-        language = "ar";
-      }
-    }
+  private async createVersion(document: Document, contentHash: string, versionNumber: number): Promise<DocumentVersion> {
     return this.db.saveDocumentVersion({
       id: this.stableId("ver", `${document.id}:${contentHash}`),
       documentId: document.id,
       version: versionNumber,
       contentHash,
-      language,
+      language: "en",
       pages: 1,
       isActive: true,
       createdAt: new Date().toISOString(),
@@ -160,7 +256,13 @@ export class IngestionService {
     return action();
   }
 
-  private chunkStage(pages: Array<{ number: number; text: string }>, versionId: string, docName: string, sourceHash: string): Chunk[] {
+  private chunkStage(
+    pages: Array<{ number: number; text: string }>,
+    versionId: string,
+    docName: string,
+    sourceHash: string,
+    extractionMethod: "normal" | "ocr" = "normal"
+  ): Chunk[] {
     const chunks: Chunk[] = [];
     let chunkIndex = 0;
     let currentSection = "General";
@@ -177,7 +279,14 @@ export class IngestionService {
         clause: currentSection,
         text: normalized,
         tokenCount: Math.ceil(normalized.length / 4),
-        metadata: { documentName: docName, sourceHash, section: currentSection, page, versionId },
+        metadata: {
+          documentName: docName,
+          sourceHash,
+          section: currentSection,
+          page,
+          versionId,
+          extractionMethod,
+        },
         createdAt: new Date().toISOString(),
       });
       chunkIndex++;

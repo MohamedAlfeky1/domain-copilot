@@ -100,7 +100,10 @@ export class HybridRetrievalService {
     this.keywordWeight = options?.keywordWeight ?? 1.0;
     this.topK = options?.topK ?? 5;
     this.evidenceThreshold = options?.evidenceThreshold ?? 0.015;
-    this.minSimilarity = options?.minSimilarity ?? 0.15;
+    const defaultMinSim = aiProvider.providerName === "gemini" ? 0.62 : 0.15;
+    this.minSimilarity =
+      options?.minSimilarity ??
+      (process.env.MIN_SIMILARITY ? parseFloat(process.env.MIN_SIMILARITY) : defaultMinSim);
   }
 
   async validateFilterScope(filter?: RetrievalScopeFilter): Promise<void> {

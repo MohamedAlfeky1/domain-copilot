@@ -1,17 +1,18 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { AppIcons } from "@/components/ui/icons";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
-  Award,
-  ShieldCheck,
-  CheckCircle2,
-  XCircle,
-  Play,
-  RefreshCw,
-  TrendingUp,
-  Clock,
-  DollarSign,
-} from "lucide-react";
+  Table,
+  TableHeader,
+  TableBody,
+  TableHead,
+  TableRow,
+  TableCell,
+} from "@/components/ui/table";
 
 interface EvalSummary {
   totalTests: number;
@@ -102,146 +103,165 @@ export default function EvaluationPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 flex items-center justify-between">
+      <Card className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm bg-card border-border">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-purple-500/20 text-purple-400 font-semibold uppercase">
+            <Badge variant="purple" className="text-[11px] font-mono uppercase">
               BENCHMARK HARNESS
-            </span>
-            <span className="text-xs text-slate-400">
+            </Badge>
+            <span className="text-xs text-muted-foreground">
               Empirical PostgreSQL &amp; pgvector Golden Benchmark ({summary.totalTests} Q/A Pairs)
             </span>
           </div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Evaluation Benchmark &amp; Quality Harness</h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <h2 className="text-xl font-bold text-foreground tracking-tight">Evaluation Benchmark &amp; Quality Harness</h2>
+          <p className="text-xs text-muted-foreground mt-1">
             Real hybrid retrieval recall, answer groundedness precision, low-evidence refusal precision, and prompt injection resistance.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           {lastEvaluatedAt && (
-            <span className="text-[11px] text-slate-500 font-mono hidden md:inline">
+            <span className="text-[11px] text-muted-foreground font-mono hidden md:inline">
               Last run: {new Date(lastEvaluatedAt).toLocaleTimeString()}
             </span>
           )}
-          <button
+          <Button
             onClick={handleRunEvaluation}
             disabled={running}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-md bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/20 transition-all disabled:opacity-60"
+            size="sm"
+            className="gap-1.5 shadow-sm"
           >
-            <Play className={`w-3.5 h-3.5 ${running ? "animate-spin" : ""}`} />
+            {running ? (
+              <AppIcons.loading className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <AppIcons.run className="w-3.5 h-3.5" />
+            )}
             {running ? "Benchmarking Engine..." : "Run Golden Evaluation"}
-          </button>
+          </Button>
         </div>
-      </div>
+      </Card>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 font-mono">
-          <span className="text-[10px] text-slate-500 uppercase">Golden Pass Rate</span>
-          <p className="text-2xl font-bold text-emerald-400 mt-1">{summary.passRatePct}%</p>
-          <p className="text-[10px] text-emerald-500/80 mt-0.5">Floor target: &gt;= 80%</p>
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="p-4 font-mono shadow-xs bg-card border-border">
+          <span className="text-[10px] text-muted-foreground uppercase font-semibold">Golden Pass Rate</span>
+          <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{summary.passRatePct}%</p>
+          <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80 mt-0.5">Floor target: &gt;= 80%</p>
+        </Card>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 font-mono">
-          <span className="text-[10px] text-slate-500 uppercase">Refusal Precision</span>
-          <p className="text-2xl font-bold text-sky-400 mt-1">{summary.refusalPrecisionPct || 100}%</p>
-          <p className="text-[10px] text-sky-500/80 mt-0.5">Zero ungrounded hallucinations</p>
-        </div>
+        <Card className="p-4 font-mono shadow-xs bg-card border-border">
+          <span className="text-[10px] text-muted-foreground uppercase font-semibold">Refusal Precision</span>
+          <p className="text-2xl font-bold text-primary mt-1">{summary.refusalPrecisionPct || 100}%</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Zero ungrounded hallucinations</p>
+        </Card>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 font-mono">
-          <span className="text-[10px] text-slate-500 uppercase">Average Latency</span>
-          <p className="text-2xl font-bold text-white mt-1">{summary.averageLatencyMs}ms</p>
-          <p className="text-[10px] text-slate-500 mt-0.5">PGlite pgvector + FTS</p>
-        </div>
+        <Card className="p-4 font-mono shadow-xs bg-card border-border">
+          <span className="text-[10px] text-muted-foreground uppercase font-semibold">Average Latency</span>
+          <p className="text-2xl font-bold text-foreground mt-1">{summary.averageLatencyMs}ms</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">PGlite pgvector + FTS</p>
+        </Card>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 font-mono">
-          <span className="text-[10px] text-slate-500 uppercase">Total Token Cost</span>
-          <p className="text-2xl font-bold text-purple-400 mt-1">${summary.totalCostUsd}</p>
-          <p className="text-[10px] text-purple-500/80 mt-0.5">gpt-4o usage ledger rate</p>
-        </div>
+        <Card className="p-4 font-mono shadow-xs bg-card border-border">
+          <span className="text-[10px] text-muted-foreground uppercase font-semibold">Total Token Cost</span>
+          <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">${summary.totalCostUsd}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Recorded usage ledger rate</p>
+        </Card>
       </div>
 
       {/* Benchmark Cases Table */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <h3 className="text-xs font-bold text-slate-200 font-mono">
+      <Card className="shadow-sm overflow-hidden bg-card border-border">
+        <div className="p-4 border-b border-border flex items-center justify-between bg-muted/20">
+          <h3 className="text-xs font-bold text-foreground font-mono tracking-wider">
             EMPIRICAL BENCHMARK CASES ({testCases.length > 0 ? testCases.length : summary.totalTests} TEST CASES)
           </h3>
-          <button
+          <Button
             onClick={fetchEvaluationData}
-            className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 font-mono"
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground hover:text-foreground text-xs font-mono h-8 px-2 gap-1.5"
+            aria-label="Refresh benchmark test cases"
           >
-            <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
+            <AppIcons.refresh className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
             Refresh
-          </button>
+          </Button>
         </div>
 
-        <table className="w-full text-left text-xs">
-          <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[10px] border-b border-slate-800">
-            <tr>
-              <th className="py-3 px-4">Test ID</th>
-              <th className="py-3 px-4">Category</th>
-              <th className="py-3 px-4">Question</th>
-              <th className="py-3 px-4">Groundedness</th>
-              <th className="py-3 px-4">Latency</th>
-              <th className="py-3 px-4 text-right">Outcome</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800 text-slate-300 font-mono">
-            {testCases.length > 0 ? (
-              testCases.map((tc) => (
-                <tr key={tc.id} className="hover:bg-slate-800/40 transition-colors">
-                  <td className="py-3 px-4 font-bold text-sky-400">{tc.id}</td>
-                  <td className="py-3 px-4">
-                    <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        tc.category === "GROUNDED"
-                          ? "bg-blue-500/20 text-blue-400"
-                          : tc.category.includes("INJECTION")
-                          ? "bg-rose-500/20 text-rose-400"
-                          : "bg-amber-500/20 text-amber-400"
-                      }`}
-                    >
-                      {tc.category}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-slate-200 font-sans max-w-md truncate">{tc.question}</td>
-                  <td className="py-3 px-4 text-slate-300">
-                    {tc.groundednessScore !== undefined ? (
-                      <span className={tc.groundednessScore >= 0.8 ? "text-emerald-400" : "text-amber-400"}>
-                        {tc.groundednessScore.toFixed(2)}
-                      </span>
-                    ) : (
-                      "0.92"
-                    )}
-                  </td>
-                  <td className="py-3 px-4 text-slate-400">{tc.latencyMs}ms</td>
-                  <td className="py-3 px-4 text-right">
-                    {tc.pass ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-400 text-[11px] font-bold">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        PASSED
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-rose-400 text-[11px] font-bold">
-                        <XCircle className="w-3.5 h-3.5" />
-                        FAILED
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={6} className="py-8 text-center text-slate-500 font-sans">
-                  Click "Run Golden Evaluation" to benchmark all 26 test cases against the live hybrid retrieval engine.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader className="bg-muted/40 font-mono uppercase text-[10px]">
+              <TableRow>
+                <TableHead className="py-3 px-4">Test ID</TableHead>
+                <TableHead className="py-3 px-4">Category</TableHead>
+                <TableHead className="py-3 px-4">Question</TableHead>
+                <TableHead className="py-3 px-4">Groundedness</TableHead>
+                <TableHead className="py-3 px-4">Latency</TableHead>
+                <TableHead className="py-3 px-4 text-right">Outcome</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className="text-xs font-mono">
+              {testCases.length > 0 ? (
+                testCases.map((tc) => (
+                  <TableRow key={tc.id} className="hover:bg-muted/30 transition-colors">
+                    <TableCell className="py-3 px-4 font-bold text-primary">{tc.id}</TableCell>
+                    <TableCell className="py-3 px-4">
+                      <Badge
+                        variant={
+                          tc.category === "GROUNDED"
+                            ? "info"
+                            : tc.category.includes("INJECTION")
+                            ? "destructive"
+                            : "warning"
+                        }
+                        className="text-[10px] font-bold"
+                      >
+                        {tc.category}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="py-3 px-4 text-foreground font-sans max-w-md truncate">
+                      {tc.question}
+                    </TableCell>
+                    <TableCell className="py-3 px-4 text-foreground">
+                      {tc.groundednessScore !== undefined ? (
+                        <span
+                          className={
+                            tc.groundednessScore >= 0.8
+                              ? "text-emerald-600 dark:text-emerald-400 font-bold"
+                              : "text-amber-600 dark:text-amber-400 font-bold"
+                          }
+                        >
+                          {tc.groundednessScore.toFixed(2)}
+                        </span>
+                      ) : (
+                        "0.92"
+                      )}
+                    </TableCell>
+                    <TableCell className="py-3 px-4 text-muted-foreground">{tc.latencyMs}ms</TableCell>
+                    <TableCell className="py-3 px-4 text-right">
+                      {tc.pass ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold">
+                          <AppIcons.success className="w-3.5 h-3.5" />
+                          PASSED
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-destructive text-[11px] font-bold">
+                          <AppIcons.error className="w-3.5 h-3.5" />
+                          FAILED
+                        </span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground font-sans">
+                    Click &quot;Run Golden Evaluation&quot; to benchmark all 26 test cases against the live hybrid retrieval engine.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </Card>
     </div>
   );
 }

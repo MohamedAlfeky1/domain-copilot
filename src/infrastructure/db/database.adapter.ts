@@ -42,6 +42,7 @@ import { vector } from "@electric-sql/pglite/vector";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { hashPassword } from "../auth/passwords";
 
 export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   // In-memory dual-layer storage
@@ -381,6 +382,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
     const adminUser: User = {
       id: "usr-admin-001",
       email: "admin@domaincopilot.ai",
+      passwordHash: hashPassword("admin123"),
       role: "ADMIN",
       status: "ACTIVE",
       createdAt: new Date().toISOString(),
@@ -388,6 +390,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
     const approverUser: User = {
       id: "usr-approver-001",
       email: "approver@domaincopilot.ai",
+      passwordHash: hashPassword("approver123"),
       role: "APPROVER",
       status: "ACTIVE",
       createdAt: new Date().toISOString(),
@@ -395,13 +398,23 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
     const expertUser: User = {
       id: "usr-expert-001",
       email: "expert@domaincopilot.ai",
+      passwordHash: hashPassword("expert123"),
       role: "EXPERT",
+      status: "ACTIVE",
+      createdAt: new Date().toISOString(),
+    };
+    const viewerUser: User = {
+      id: "usr-viewer-001",
+      email: "viewer@domaincopilot.ai",
+      passwordHash: hashPassword("viewer123"),
+      role: "VIEWER",
       status: "ACTIVE",
       createdAt: new Date().toISOString(),
     };
     this.users.set(adminUser.id, adminUser);
     this.users.set(approverUser.id, approverUser);
     this.users.set(expertUser.id, expertUser);
+    this.users.set(viewerUser.id, viewerUser);
   }
 
   // --- Scope Validation (RET-002) ---
@@ -462,6 +475,9 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
 
   // --- Users ---
   async getUserByEmail(email: string): Promise<User | null> {
+    if (!this.users.has("usr-viewer-001") || !this.users.get("usr-admin-001")?.passwordHash) {
+      this.seedDefaultUsers();
+    }
     for (const u of this.users.values()) {
       if (u.email.toLowerCase() === email.toLowerCase()) return u;
     }
@@ -469,6 +485,9 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   }
 
   async getUserById(id: string): Promise<User | null> {
+    if (!this.users.has("usr-viewer-001") || !this.users.get("usr-admin-001")?.passwordHash) {
+      this.seedDefaultUsers();
+    }
     return this.users.get(id) || null;
   }
 
@@ -622,6 +641,14 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   }
 
   // --- Vector Store Operations ---
+  getCorpusEmbeddingModel(): string | null {
+    if (this.embeddings.size > 0) {
+      const first = this.embeddings.values().next().value;
+      return first?.model || null;
+    }
+    return null;
+  }
+
   async saveEmbedding(embedding: ChunkEmbedding): Promise<void> {
     this.embeddings.set(embedding.chunkId, embedding);
     this.scheduleDiskPersist();
@@ -631,7 +658,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
         await this.pg!.query(
           `INSERT INTO chunk_embeddings (id, chunk_id, model, dimension, vector, created_at)
            VALUES ($1, $2, $3, $4, $5::vector, $6)
-           ON CONFLICT (id) DO UPDATE SET vector = EXCLUDED.vector;`,
+           ON CONFLICT (id) DO UPDATE SET vector = EXCLUDED.vector, model = EXCLUDED.model, dimension = EXCLUDED.dimension;`,
           [embedding.id, embedding.chunkId, embedding.model, embedding.dimension, vecStr, embedding.createdAt]
         );
       } catch (e) {
@@ -643,6 +670,45 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   async saveBatchEmbeddings(newEmbeddings: ChunkEmbedding[]): Promise<void> {
     for (const e of newEmbeddings) {
       await this.saveEmbedding(e);
+    }
+  }
+
+  async replaceActiveEmbeddings(newEmbeddings: ChunkEmbedding[], targetModel?: string): Promise<void> {
+    this.embeddings.clear();
+    for (const e of newEmbeddings) {
+      this.embeddings.set(e.chunkId, e);
+    }
+    this.saveToDisk();
+
+    if (await this.ensurePgReady()) {
+      try {
+        await this.pg!.query("BEGIN;");
+        await this.pg!.query("DELETE FROM chunk_embeddings;");
+
+        const batchSize = 50;
+        for (let i = 0; i < newEmbeddings.length; i += batchSize) {
+          const slice = newEmbeddings.slice(i, i + batchSize);
+          const valuesClauses: string[] = [];
+          const params: any[] = [];
+          let pIdx = 1;
+
+          for (const emb of slice) {
+            const vecStr = `[${emb.vector.join(",")}]`;
+            valuesClauses.push(`($${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}::vector, $${pIdx++})`);
+            params.push(emb.id, emb.chunkId, emb.model, emb.dimension, vecStr, emb.createdAt);
+          }
+
+          const sql = `INSERT INTO chunk_embeddings (id, chunk_id, model, dimension, vector, created_at) VALUES ${valuesClauses.join(", ")};`;
+          await this.pg!.query(sql, params);
+        }
+
+        await this.pg!.query("COMMIT;");
+      } catch (err) {
+        try {
+          await this.pg!.query("ROLLBACK;");
+        } catch {}
+        console.warn("PGlite replaceActiveEmbeddings notice (in-memory state preserved):", err);
+      }
     }
   }
 

@@ -1,0 +1,43 @@
+# Clinical Protocol: Anaphylaxis and Acute Allergy Emergency Management
+
+## Category: Allergy & Immunology · Emergency Protocol v1.0
+
+### Section 1: Clinical Definition, Scope, and Triggers
+Anaphylaxis is an acute, severe, life-threatening systemic hypersensitivity reaction (الحساسية المفرطة / التأق) characterized by rapid onset and potential airway, breathing, or circulatory compromise. Common triggers include food allergens (peanuts, tree nuts, shellfish, milk, eggs), insect stings (Hymenoptera venoms), medications (beta-lactam antibiotics, NSAIDs, neuromuscular blocking agents), and radiocontrast media. All clinical staff in ambulatory and inpatient settings must immediately recognize signs of anaphylaxis and initiate prompt intervention without delay.
+
+### Section 2: Cardinal Clinical Signs & Symptoms (Bilingual AR/EN)
+The diagnosis of anaphylaxis is primarily clinical. Symptoms develop within seconds to minutes following allergen exposure and involve multiple organ systems:
+1. Cutaneous and Mucosal Symptoms (الأعراض الجلدية والمخاطية):
+Present in over 90% of cases. Symptoms include generalized urticaria (الشرى المعمم), diffuse erythema and flushing (احمرار الجلد والتوهج), intense generalized pruritus (الحكة الشديدة), and angioedema (الوذمة الوعائية) characterized by acute swelling of the face, lips, tongue, uvula, and periorbital tissue (تورم الشفتين واللسان وسقف الحلق ومحيط العينين).
+2. Respiratory Symptoms (الأعراض التنفسية):
+Upper and lower airway compromise. Signs include acute dyspnea (ضيق التنفس الحاد), severe bronchospasm with diffuse wheezing (صفير الصدر وتشنج القصبات الهوائية), laryngeal edema with inspiratory stridor (وذمة الحنجرة وصرير تنفسي حاد), dysphonia or hoarseness (بحة الصوت), persistent dry cough, intercostal muscle retractions, and sensation of throat closure or choking (الشعور بانسداد الحلق والاختناق).
+3. Cardiovascular Symptoms (أعراض الجهاز الدوراني):
+Precipitous systemic hypotension with systolic blood pressure drop > 30% or < 90 mmHg (انخفاض حاد في ضغط الدم), reflex compensatory tachycardia or severe bradycardia (تسارع ضربات القلب), weak or thready peripheral pulse, profound dizziness, cold diaphoresis, syncope, circulatory collapse, and anaphylactic shock (دوار حاد، تعرق بارد، إغماء، وانهيار الدورة الدموية والصدمة التأقية).
+4. Gastrointestinal Symptoms (الأعراض الهضمية):
+Severe crampy abdominal pain (مغص بطني حاد), persistent nausea, projectile vomiting (غثيان وقيء مستمر), explosive watery diarrhea, and difficulty swallowing (صعوبة البلع).
+
+### Section 3: First-Line Emergency Pharmacotherapy: Epinephrine Administration
+Intramuscular Epinephrine (الأدرينالين / الإبينفرين) is the single first-line treatment of choice for anaphylaxis and must be administered immediately upon clinical suspicion.
+1. Formulation and Concentration: Epinephrine 1:1,000 (1 mg/mL) aqueous solution.
+2. Route and Injection Site: Intramuscular (IM) injection strictly into the mid-outer aspect of the anterolateral thigh (vastus lateralis muscle). Subcutaneous or deltoid injection is prohibited due to significantly slower absorption kinetics.
+3. Dosing Guidelines:
+   - Adults and adolescents (> 50 kg): 0.3 mg to 0.5 mg IM (0.3 mL to 0.5 mL of 1:1,000).
+   - Pediatric patients (15–30 kg): 0.15 mg IM (0.15 mL of 1:1,000) or pediatric auto-injector.
+   - Pediatric patients (> 30 kg): 0.3 mg IM auto-injector.
+   - Infants (< 10 kg): 0.01 mg/kg IM (0.01 mL/kg of 1:1,000).
+4. Repeat Injections: If symptoms do not improve or if clinical deterioration continues, repeat epinephrine dose every 5 to 15 minutes. There is no absolute contraindication to epinephrine in anaphylaxis.
+
+### Section 4: Secondary Adjunctive Medications & Fluid Resuscitation
+Secondary medications should NEVER delay the administration of first-line intramuscular epinephrine.
+1. Patient Positioning: Place patient in supine position with lower extremities elevated (Trendelenburg) to preserve venous return, unless dyspnea or emesis necessitates an upright or left-lateral position.
+2. High-Flow Oxygen: Administer 100% oxygen via non-rebreather mask at 10 to 15 L/min for all patients with respiratory distress or hypotension.
+3. Intravenous Crystalloid Resuscitation: Establish wide-bore intravenous access immediately. Administer 1 to 2 liters of isotonic crystalloids (0.9% Normal Saline or Ringer's Lactate) rapidly under pressure for persistent hypotension.
+4. H1 and H2 Antihistamines: Diphenhydramine 25 to 50 mg IV plus Famotidine 20 mg IV slow push to relieve pruritus, urticaria, and angioedema.
+5. Systemic Corticosteroids: Methylprednisolone 1 to 2 mg/kg IV (max 125 mg) or Hydrocortisone 100 to 200 mg IV to prevent or diminish biphasic anaphylactic reactions.
+6. Inhaled Bronchodilators: Albuterol 2.5 to 5 mg via nebulizer for persistent bronchospasm refractory to epinephrine.
+
+### Section 5: Observation, Biphasic Reactions & Discharge Criteria
+Biphasic anaphylaxis (التفاعل التأقي ثنائي الطور) occurs in up to 20% of patients, defined as a recurrence of severe symptoms hours after complete resolution of initial manifestations without re-exposure to the trigger.
+1. Minimum Observation Window: All patients with resolved anaphylaxis must be continuously monitored for a minimum of 6 to 8 hours.
+2. Extended Observation (12 to 24 hours): Required for patients presenting with severe hypotension, those requiring multiple doses of epinephrine, patients with poorly controlled asthma, or those living alone.
+3. Discharge Protocol: Patients must be prescribed two Epinephrine auto-injectors (0.3 mg or 0.15 mg) with written instructions and personalized allergy action plan. Provide a 3-day course of oral H1 antihistamines (cetirizine 10 mg daily) and oral corticosteroids (prednisone 40-50 mg daily).

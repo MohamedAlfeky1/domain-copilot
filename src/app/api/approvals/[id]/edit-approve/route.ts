@@ -11,7 +11,7 @@ export async function POST(
   try {
     const user = await requireRole(req, ["ADMIN", "APPROVER"]);
     const body = await req.json();
-    const { modifiedPayload, comment, reviewerId } = body;
+    const { modifiedPayload, comment } = body;
 
     if (!modifiedPayload) {
       return NextResponse.json({ error: "modifiedPayload is required for edit-and-approve" }, { status: 400 });
@@ -19,7 +19,7 @@ export async function POST(
 
     const approval = await container.approvalService.editAndApprove(
       params.id,
-      reviewerId || "usr-approver-001",
+      user.id,
       modifiedPayload,
       comment
     );

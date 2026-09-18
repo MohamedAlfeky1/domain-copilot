@@ -20,7 +20,8 @@ const topK = queryTerms < 4 ? 12 : 5; // Scale depth for ambiguous/short queries
 import { createHmac } from "crypto";
 
 export function generateApprovalToken(approvalId: string, reviewerId: string): string {
-  const secret = process.env.JWT_SECRET || "default-secret";
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error("JWT_SECRET is required");
   return createHmac("sha256", secret)
     .update(`${approvalId}:${reviewerId}:${Date.now()}`)
     .digest("hex");

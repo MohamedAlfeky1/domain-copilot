@@ -3,11 +3,13 @@ import { container } from "@/core/application/container";
 import { DomainError, UnsupportedFileTypeError, ValidationError } from "@/core/domain/errors";
 import { createHash } from "crypto";
 import { localStagingStorage } from "@/infrastructure/storage/local-staging.adapter";
+import { requireAuth, requireRole } from "@/infrastructure/auth/auth-guard";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    await requireAuth(req);
     const docs = await container.db.listDocuments();
     const totalChunks = await container.db.countTotalChunks();
     const jobs = await container.db.listIngestionJobs();
@@ -18,12 +20,13 @@ export async function GET() {
       totalChunksIndexed: totalChunks,
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: error.httpStatus || 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await requireRole(req, ["ADMIN"]);
     const contentType = req.headers.get("content-type") || "";
 
     let filename = `document-${Date.now()}.txt`;
@@ -79,6 +82,7 @@ export async function POST(req: NextRequest) {
       filename,
       mimeType,
       buffer,
+      ownerId: user.id,
     });
 
     return NextResponse.json(
@@ -93,7 +97,7 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (error: any) {
-    const status = error instanceof DomainError ? error.httpStatus : 500;
+    const status = error.httpStatus || (error instanceof DomainError ? error.httpStatus : 500);
     return NextResponse.json({ error: error.message || "Document ingestion failed", code: error.code || "INGESTION_ERROR" }, { status });
   }
 }

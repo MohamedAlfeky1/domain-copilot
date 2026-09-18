@@ -16,11 +16,11 @@ export async function POST(
   try {
     const user = await requireRole(req, ["ADMIN", "APPROVER"]);
     const body = await req.json().catch(() => ({}));
-    const { comment, reviewerId } = body;
+    const { comment } = body;
 
     const approval = await container.approvalService.approve(
       params.id,
-      reviewerId || user.id,
+      user.id,
       comment
     );
 

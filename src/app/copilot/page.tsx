@@ -1,24 +1,10 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import {
-  Send,
-  Square,
-  Bot,
-  User,
-  ShieldAlert,
-  CheckCircle,
-  ExternalLink,
-  Sparkles,
-  ChevronRight,
-  Layers,
-  Copy,
-  Check,
-  Cpu,
-  AlertTriangle,
-  Clock,
-  ArrowRight,
-} from "lucide-react";
+import { AppIcons } from "@/components/ui/icons";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 
 interface Citation {
   citationId: string;
@@ -74,7 +60,7 @@ export default function CopilotPage() {
     { agent: "Clinical Evidence Extractor", status: "pending" },
     { agent: "Contraindication & Safety Auditor", status: "pending" },
     { agent: "Bilingual Context & Policy Guard", status: "pending" },
-    { agent: "Therapeutic Protocol Drafter (gpt-4o)", status: "pending" },
+    { agent: "Therapeutic Protocol Drafter", status: "pending" },
   ]);
 
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -99,7 +85,7 @@ export default function CopilotPage() {
       { agent: "Clinical Evidence Extractor", status: "pending" },
       { agent: "Contraindication & Safety Auditor", status: "pending" },
       { agent: "Bilingual Context & Policy Guard", status: "pending" },
-      { agent: "Therapeutic Protocol Drafter (gpt-4o)", status: "pending" },
+      { agent: "Therapeutic Protocol Drafter", status: "pending" },
     ]);
 
     try {
@@ -259,114 +245,118 @@ export default function CopilotPage() {
   return (
     <div className="h-full flex gap-5 overflow-hidden">
       {/* Main Copilot Workspace */}
-      <div className="flex-1 flex flex-col h-full bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
+      <div className="flex-1 flex flex-col h-full bg-card border border-border rounded-xl overflow-hidden shadow-xs">
         {/* Workspace Header */}
-        <div className="p-4 border-b border-slate-800 bg-slate-900 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center">
-              <Bot className="w-4 h-4" />
+        <div className="p-4 border-b border-border bg-card flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-sky-100 text-sky-700 border border-sky-200 flex items-center justify-center">
+              <AppIcons.copilot className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-white tracking-tight">Copilot Grounded Workspace</h2>
-              <p className="text-[10px] text-slate-400 font-mono">
-                Assigned Domain Multi-Agent Pipeline · gpt-4o Real-Time Stream
+              <h2 className="text-sm font-bold text-foreground tracking-tight">Copilot Grounded Workspace</h2>
+              <p className="text-[10px] text-muted-foreground font-mono">
+                Assigned Domain Multi-Agent Pipeline · Real-Time Stream
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 text-xs">
             {twistEvaluation && (
-              <span
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-mono text-[11px] ${
-                  twistEvaluation.isPermitted
-                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
-                    : "bg-rose-500/10 border-rose-500/30 text-rose-300"
-                }`}
+              <Badge
+                variant={twistEvaluation.isPermitted ? "success" : "destructive"}
+                className="gap-1.5 font-mono text-[11px]"
               >
-                <ShieldAlert className="w-3.5 h-3.5" />
+                <AppIcons.warning className="w-3.5 h-3.5" />
                 TWIST GUARD: {twistEvaluation.isPermitted ? "PERMITTED" : "TRIPPED"} ({twistEvaluation.computedRiskIndex}/{twistEvaluation.threshold})
-              </span>
+              </Badge>
             )}
 
             {isRefused ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-500/10 border border-rose-500/30 text-rose-300 font-mono text-[11px]">
-                <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+              <Badge variant="destructive" className="gap-1.5 font-mono text-[11px]">
+                <AppIcons.warning className="w-3.5 h-3.5" />
                 REFUSED: LOW EVIDENCE
-              </span>
+              </Badge>
             ) : streamedText.length > 0 ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-mono text-[11px]">
-                <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+              <Badge variant="success" className="gap-1.5 font-mono text-[11px]">
+                <AppIcons.success className="w-3.5 h-3.5" />
                 GROUNDED SYNTHESIS
-              </span>
+              </Badge>
             ) : null}
 
             {streamedText && (
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={handleCopy}
-                className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
+                className="h-7 px-2.5 text-xs gap-1 text-slate-700"
               >
-                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                {copied ? <AppIcons.check className="w-3 h-3 text-emerald-600" /> : <AppIcons.copy className="w-3 h-3" />}
                 <span>{copied ? "Copied" : "Copy"}</span>
-              </button>
+              </Button>
             )}
           </div>
         </div>
 
         {/* Answer Content Panel */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 font-sans text-sm leading-relaxed">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 font-sans text-sm leading-relaxed bg-slate-50/30 flex flex-col">
           {streamedText.length === 0 && !isRefused && (
-            <div className="h-full flex flex-col items-center justify-center text-slate-500 py-12">
-              <Sparkles className="w-10 h-10 mb-3 text-sky-500 opacity-30 animate-pulse" />
-              <p className="text-base font-semibold text-slate-400">Ask a domain-grounded query</p>
-              <p className="text-xs text-slate-500 max-w-md text-center mt-1">
+            <div className="flex-1 flex flex-col items-center justify-center text-center py-12 px-4 select-none">
+              <AppIcons.copilot
+                className="w-7 h-7 text-sky-500 mb-3.5 shrink-0"
+                aria-hidden="true"
+              />
+              <h3 className="text-base font-semibold text-slate-800 tracking-tight">
+                Ask a domain-grounded clinical query
+              </h3>
+              <p className="text-xs text-muted-foreground max-w-sm mt-1.5 leading-relaxed">
                 The multi-agent orchestrator will perform hybrid pgvector retrieval, verify evidence with specialists, and stream citations.
               </p>
             </div>
           )}
 
           {isRefused && (
-            <div className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs space-y-2">
-              <div className="flex items-center gap-2 font-semibold text-rose-400">
-                <ShieldAlert className="w-4 h-4" />
+            <Card className="border-rose-200 bg-rose-50/50 p-4 shadow-xs">
+              <div className="flex items-center gap-2 font-semibold text-rose-800 text-xs">
+                <AppIcons.warning className="w-4 h-4 text-rose-600" />
                 <span>Low-Evidence Refusal Triggered</span>
               </div>
-              <p className="leading-normal">{refusalMessage}</p>
-            </div>
+              <p className="text-xs text-rose-700 mt-1.5 leading-normal">{refusalMessage}</p>
+            </Card>
           )}
 
           {/* Twist Guard Alert Banner (TW-005) */}
           {twistEvaluation && !twistEvaluation.isPermitted && (
-            <div className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs space-y-2">
-              <div className="flex items-center justify-between font-semibold text-rose-400">
+            <Card className="border-rose-200 bg-rose-50/50 p-4 shadow-xs space-y-2">
+              <div className="flex items-center justify-between font-semibold text-rose-800 text-xs">
                 <div className="flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4" />
+                  <AppIcons.warning className="w-4 h-4 text-rose-600" />
                   <span>Mandatory Safety Guard Active: Risk Ceiling Exceeded</span>
                 </div>
-                <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-300">
+                <Badge variant="destructive" className="font-mono text-[10px]">
                   Risk Index: {twistEvaluation.computedRiskIndex} / Ceiling: {twistEvaluation.threshold}
-                </span>
+                </Badge>
               </div>
-              <p className="text-[11px] text-rose-200/80 font-mono">
+              <p className="text-[11px] text-rose-700 font-mono">
                 Enforced Policy: {twistEvaluation.enforcedPolicy}
               </p>
               {twistEvaluation.violations.length > 0 && (
-                <ul className="list-disc list-inside space-y-1 text-[11px] text-rose-300/90 font-mono">
+                <ul className="list-disc list-inside space-y-1 text-[11px] text-rose-700 font-mono">
                   {twistEvaluation.violations.map((v, i) => (
                     <li key={i}>{v}</li>
                   ))}
                 </ul>
               )}
-            </div>
+            </Card>
           )}
 
           {/* HITL Approval Banner */}
           {isAwaitingApproval && pendingApproval && (
-            <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-3">
-              <div className="flex items-center gap-2 font-semibold text-amber-400">
-                <AlertTriangle className="w-4 h-4" />
+            <Card className="border-amber-200 bg-amber-50/50 p-4 shadow-xs space-y-3">
+              <div className="flex items-center gap-2 font-semibold text-amber-900 text-xs">
+                <AppIcons.warning className="w-4 h-4 text-amber-600" />
                 <span>Workflow Paused: Human Approval Required</span>
               </div>
-              <p className="leading-normal text-amber-200/80">{pendingApproval.proposedAction}</p>
+              <p className="text-xs text-amber-800 leading-normal">{pendingApproval.proposedAction}</p>
 
               {pendingApproval.riskFlags.length > 0 && (
                 <div className="space-y-1.5">
@@ -375,10 +365,10 @@ export default function CopilotPage() {
                       key={i}
                       className={`px-2.5 py-1.5 rounded text-[11px] font-mono border ${
                         flag.severity === "CRITICAL"
-                          ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
+                          ? "bg-rose-100/60 border-rose-200 text-rose-800"
                           : flag.severity === "HIGH"
-                          ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
-                          : "bg-sky-500/10 border-sky-500/30 text-sky-300"
+                          ? "bg-amber-100/60 border-amber-200 text-amber-900"
+                          : "bg-sky-100/60 border-sky-200 text-sky-800"
                       }`}
                     >
                       <span className="font-bold">{flag.severity}:</span> {flag.riskType} — {flag.detail}
@@ -388,33 +378,37 @@ export default function CopilotPage() {
               )}
 
               <div className="flex items-center gap-3 pt-1">
-                <a
-                  href="/reviews"
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold shadow-lg shadow-amber-600/20 transition-all"
+                <Button
+                  size="sm"
+                  className="bg-amber-600 hover:bg-amber-500 text-white gap-1.5 text-xs shadow-xs"
+                  asChild
                 >
-                  <ShieldAlert className="w-3.5 h-3.5" />
-                  Review in HITL Queue
-                  <ArrowRight className="w-3 h-3" />
-                </a>
-                <span className="text-[10px] font-mono text-amber-400/60 flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
+                  <a href="/reviews">
+                    <AppIcons.warning className="w-3.5 h-3.5" />
+                    Review in HITL Queue
+                    <AppIcons.arrowRight className="w-3 h-3" />
+                  </a>
+                </Button>
+                <span className="text-[10px] font-mono text-amber-700 flex items-center gap-1">
+                  <AppIcons.pending className="w-3 h-3" />
                   Approval ID: {pendingApproval.approvalId}
                 </span>
               </div>
-            </div>
+            </Card>
           )}
 
           {streamedText && (
-            <div className="prose prose-invert max-w-none text-slate-200 whitespace-pre-wrap" dir="auto">
-              {streamedText}
-            </div>
+            <Card className="p-5 shadow-xs border-slate-200 bg-card">
+              <div className="prose prose-slate max-w-none text-slate-800 leading-relaxed whitespace-pre-wrap text-sm" dir="auto">
+                {streamedText}
+              </div>
+            </Card>
           )}
 
           {/* Citations Chip Bar */}
           {citations.length > 0 && (
-            <div className="pt-4 border-t border-slate-800/80">
-              <p className="text-[11px] font-mono text-slate-400 mb-2 flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-sky-400" />
+            <div className="pt-2">
+              <p className="text-[11px] font-mono text-muted-foreground mb-2 font-semibold">
                 VERIFIED CITATIONS ({citations.length}):
               </p>
               <div className="flex flex-wrap gap-2">
@@ -422,10 +416,10 @@ export default function CopilotPage() {
                   <button
                     key={c.citationId || i}
                     onClick={() => setSelectedCitation(c)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] font-mono text-sky-300 transition-colors shadow-sm"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-[11px] font-mono text-sky-700 transition-colors shadow-2xs"
                   >
                     <span>[{c.documentName}, p.{c.page || 1}]</span>
-                    <ExternalLink className="w-2.5 h-2.5 text-slate-400" />
+                    <AppIcons.external className="w-2.5 h-2.5 text-slate-400" />
                   </button>
                 ))}
               </div>
@@ -434,38 +428,37 @@ export default function CopilotPage() {
         </div>
 
         {/* Live Multi-Agent Progress Rail */}
-        <div className="px-5 py-2.5 border-t border-slate-800 bg-slate-950/80">
+        <div className="px-5 py-2.5 border-t border-border bg-slate-50">
           <div className="flex items-center justify-between text-[11px] font-mono mb-2">
-            <span className="text-slate-400 flex items-center gap-1.5">
-              <Cpu className="w-3.5 h-3.5 text-sky-400" />
+            <span className="text-muted-foreground font-semibold">
               LIVE AGENT WORKFLOW:
             </span>
-            {streaming && <span className="text-sky-400 animate-pulse">Running...</span>}
+            {streaming && <span className="text-sky-600 font-semibold animate-pulse">Running...</span>}
           </div>
           <div className="flex flex-wrap gap-2">
             {steps.map((step, idx) => (
               <div
                 key={step.agent}
-                className={`px-2.5 py-1.5 rounded text-[10px] font-mono flex items-center gap-2 border transition-all ${
+                className={`px-2.5 py-1 rounded-md text-[10px] font-mono flex items-center gap-1.5 border transition-all ${
                   step.status === "completed"
-                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-700 font-semibold"
                     : step.status === "running"
-                    ? "bg-sky-500/10 border-sky-500/30 text-sky-300 animate-pulse"
+                    ? "bg-sky-50 border-sky-300 text-sky-700 font-semibold animate-pulse"
                     : step.status === "approval_pending"
-                    ? "bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse"
-                    : "bg-slate-900 border-slate-800 text-slate-500"
+                    ? "bg-amber-50 border-amber-300 text-amber-700 font-semibold animate-pulse"
+                    : "bg-white border-slate-200 text-slate-400"
                 }`}
               >
                 <span className="font-bold">{String(idx + 1).padStart(2, "0")}</span>
                 <span className="truncate">{step.agent}</span>
-                {step.status === "approval_pending" && <Clock className="w-3 h-3 text-amber-400" />}
+                {step.status === "approval_pending" && <AppIcons.pending className="w-3 h-3 text-amber-600" />}
               </div>
             ))}
           </div>
         </div>
 
         {/* Question Composer Form */}
-        <form onSubmit={handleSubmit} className="p-4 border-t border-slate-800 bg-slate-900">
+        <form onSubmit={handleSubmit} className="p-4 border-t border-border bg-card">
           <div className="flex gap-2">
             <textarea
               value={query}
@@ -479,26 +472,27 @@ export default function CopilotPage() {
               dir="auto"
               rows={2}
               placeholder="Ask a question grounded in the clinical protocol corpus (English or Arabic)..."
-              className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 resize-none font-sans"
+              className="flex-1 bg-white border border-slate-200 rounded-lg p-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 resize-none font-sans"
             />
             {streaming ? (
-              <button
+              <Button
                 type="button"
+                variant="destructive"
                 onClick={handleCancel}
-                className="px-4 bg-rose-600 hover:bg-rose-500 text-white rounded-lg flex items-center gap-1.5 text-xs font-semibold shadow-lg shadow-rose-600/20 transition-all shrink-0"
+                className="gap-1.5 text-xs font-semibold shrink-0 h-auto"
               >
-                <Square className="w-3.5 h-3.5 fill-current" />
+                <AppIcons.stop className="w-3.5 h-3.5 fill-current" />
                 Cancel
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
                 type="submit"
                 disabled={!query.trim()}
-                className="px-5 bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white rounded-lg flex items-center gap-1.5 text-xs font-semibold shadow-lg shadow-sky-600/20 transition-all shrink-0"
+                className="gap-1.5 text-xs font-semibold shrink-0 h-auto px-5 shadow-xs"
               >
-                <Send className="w-3.5 h-3.5" />
+                <AppIcons.send className="w-3.5 h-3.5" />
                 Run
-              </button>
+              </Button>
             )}
           </div>
         </form>
@@ -506,43 +500,44 @@ export default function CopilotPage() {
 
       {/* Side Evidence Drawer (RET-003) */}
       {selectedCitation && (
-        <div className="w-80 bg-slate-900 border border-slate-800 rounded-xl flex flex-col shrink-0 shadow-2xl overflow-hidden animate-in slide-in-from-right-5">
-          <div className="p-4 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between">
-            <h3 className="text-xs font-bold text-white font-mono flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-sky-400" />
+        <div className="w-80 bg-card border border-border rounded-xl flex flex-col shrink-0 shadow-lg overflow-hidden animate-in slide-in-from-right-5">
+          <div className="p-4 border-b border-border bg-slate-50 flex items-center justify-between">
+            <h3 className="text-xs font-bold text-foreground font-mono">
               SOURCE EVIDENCE DRAWER
             </h3>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setSelectedCitation(null)}
-              className="text-slate-400 hover:text-white text-xs px-2 py-0.5 rounded bg-slate-800"
+              className="h-7 px-2 text-xs text-slate-500 hover:text-foreground"
             >
               Close
-            </button>
+            </Button>
           </div>
 
           <div className="p-4 flex-1 overflow-y-auto space-y-3 text-xs">
             <div className="space-y-1 font-mono text-[11px]">
-              <p className="text-slate-400">Document:</p>
-              <p className="font-semibold text-white">{selectedCitation.documentName}</p>
+              <p className="text-muted-foreground">Document:</p>
+              <p className="font-semibold text-slate-900">{selectedCitation.documentName}</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 font-mono text-[10px] text-slate-400 pt-1">
-              <div className="p-2 rounded bg-slate-950 border border-slate-800">
-                <span>Page:</span> <strong className="text-slate-200">{selectedCitation.page || 1}</strong>
+            <div className="grid grid-cols-2 gap-2 font-mono text-[10px] text-muted-foreground pt-1">
+              <div className="p-2 rounded-md bg-slate-50 border border-slate-200">
+                <span>Page:</span> <strong className="text-slate-800">{selectedCitation.page || 1}</strong>
               </div>
-              <div className="p-2 rounded bg-slate-950 border border-slate-800">
-                <span>RRF Score:</span> <strong className="text-emerald-400">{selectedCitation.score}</strong>
+              <div className="p-2 rounded-md bg-slate-50 border border-slate-200">
+                <span>RRF Score:</span> <strong className="text-emerald-600">{selectedCitation.score}</strong>
               </div>
             </div>
 
             <div className="space-y-1">
-              <p className="text-[11px] font-mono text-slate-400">Verbatim Stored Chunk:</p>
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-[11px] text-slate-300 leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap" dir="auto">
+              <p className="text-[11px] font-mono text-muted-foreground">Verbatim Stored Chunk:</p>
+              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 font-mono text-[11px] text-slate-800 leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap" dir="auto">
                 {selectedCitation.excerpt}
               </div>
             </div>
 
-            <div className="p-2.5 rounded bg-sky-500/10 border border-sky-500/20 text-[10px] font-mono text-sky-300">
+            <div className="p-2.5 rounded-md bg-sky-50 border border-sky-200 text-[10px] font-mono text-sky-800">
               ✓ Grounded Citation verified against pgvector similarity index.
             </div>
           </div>

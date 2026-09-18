@@ -3,6 +3,7 @@
  * These adapters deliberately return page/heading information so chunking can
  * retain citation metadata instead of treating documents as an opaque string.
  */
+import path from "path";
 import { inflateRawSync } from "zlib";
 import { UnsupportedFileTypeError, ValidationError } from "../../domain/errors";
 
@@ -15,6 +16,7 @@ export interface ExtractionResult {
   text: string;
   pages: ExtractedPage[];
   detectedFormat: "PDF" | "DOCX" | "TEXT";
+  extractionMethod?: "normal" | "ocr";
 }
 
 export interface CleaningResult {
@@ -25,7 +27,7 @@ export interface CleaningResult {
 
 export interface IExtractor {
   supports(filename: string, mimeType: string): boolean;
-  extract(buffer: Buffer): ExtractionResult;
+  extract(buffer: Buffer): ExtractionResult | Promise<ExtractionResult>;
 }
 
 export interface ICleaner {
@@ -80,54 +82,76 @@ export class DocxExtractor implements IExtractor {
 }
 
 /**
- * Extracts text-show operators from text PDFs. Scanned PDFs correctly fail
- * with an actionable error because they require an OCR adapter, rather than
- * being silently indexed as binary data.
+ * Standard PDF text extractor using Mozilla PDF.js (pdfjs-dist).
+ * Handles font mapping, ToUnicode CMaps, multi-page layout, and Unicode (Arabic & English).
+ * Scanned image-only PDFs correctly throw ValidationError requesting OCR.
  */
 export class PdfExtractor implements IExtractor {
   supports(filename: string, mimeType: string) {
     return mimeType === "application/pdf" || /\.pdf$/i.test(filename);
   }
 
-  extract(buffer: Buffer): ExtractionResult {
+  async extract(buffer: Buffer): Promise<ExtractionResult> {
     if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-") {
       throw new ValidationError("Invalid PDF signature.");
     }
-    const raw = buffer.toString("latin1");
-    const objects = raw.split(/(?=\d+\s+\d+\s+obj\b)/g);
-    const pageObjects = objects.filter((value) => /\/Type\s*\/Page\b/.test(value));
-    const decodedStreams = objects.map((value) => this.decodeStream(value)).filter((value): value is string => Boolean(value));
-    // PDFs frequently compress their text streams. When exact page-to-stream
-    // mapping is unavailable, retain sequential page metadata rather than
-    // dropping text or inventing a page number.
-    const sources = pageObjects.length ? pageObjects.map((page, index) => page + "\n" + (decodedStreams[index] || "")) : decodedStreams;
-    const pages = sources.map((source, index) => ({ number: index + 1, text: this.readText(source) })).filter((page) => page.text.trim());
-    const text = pages.map((page) => page.text).join("\n\n");
-    if (!text.trim()) {
-      throw new ValidationError("PDF has no embedded text. Upload an OCR-enabled PDF or add an OCR extractor.");
-    }
-    return { text, pages, detectedFormat: "PDF" };
-  }
 
-  private readText(source: string): string {
-    const fragments: string[] = [];
-    const literal = /\((?:\\.|[^\\)])*\)\s*(?:Tj|')/g;
-    for (const match of source.matchAll(literal)) {
-      fragments.push(match[0].replace(/\s*(?:Tj|')$/, "").slice(1, -1).replace(/\\([()\\])/g, "$1").replace(/\\n/g, "\n"));
-    }
-    return fragments.join(" ").replace(/\s+/g, " ").trim();
-  }
-
-  private decodeStream(object: string): string | null {
-    const marker = object.indexOf("stream");
-    const end = object.indexOf("endstream", marker + 6);
-    if (marker < 0 || end < 0) return null;
-    const rawStream = object.slice(marker + 6, end).replace(/^\r?\n/, "").replace(/\r?\n$/, "");
     try {
-      if (/\/FlateDecode/.test(object)) return inflateRawSync(Buffer.from(rawStream, "latin1")).toString("latin1");
-      return rawStream;
-    } catch {
-      return rawStream;
+      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      const cMapUrl = path.join(process.cwd(), "node_modules/pdfjs-dist/cmaps/").replace(/\\/g, "/").replace(/\/?$/, "/");
+      const standardFontDataUrl = path.join(process.cwd(), "node_modules/pdfjs-dist/standard_fonts/").replace(/\\/g, "/").replace(/\/?$/, "/");
+
+      const loadingTask = pdfjs.getDocument({
+        data: new Uint8Array(buffer),
+        useSystemFonts: true,
+        cMapUrl,
+        cMapPacked: true,
+        standardFontDataUrl,
+      });
+
+      const doc = await loadingTask.promise;
+      const numPages = doc.numPages;
+      const pages: ExtractedPage[] = [];
+
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const page = await doc.getPage(pageNum);
+        const textContent = await page.getTextContent();
+
+        const lines: string[] = [];
+        let currentLine = "";
+
+        for (const item of textContent.items) {
+          if ("str" in item) {
+            currentLine += item.str;
+            if (item.hasEOL) {
+              lines.push(currentLine);
+              currentLine = "";
+            }
+          }
+        }
+        if (currentLine.trim()) {
+          lines.push(currentLine);
+        }
+
+        const pageText = lines.join("\n").replace(/[ \t]+/g, " ").trim();
+        if (pageText) {
+          pages.push({
+            number: pageNum,
+            text: pageText,
+          });
+        }
+      }
+
+      const text = pages.map((page) => page.text).join("\n\n").trim();
+      if (!text) {
+        throw new ValidationError("PDF has no embedded text. Upload an OCR-enabled PDF or add an OCR extractor.");
+      }
+
+      return { text, pages, detectedFormat: "PDF" };
+    } catch (err: unknown) {
+      if (err instanceof ValidationError) throw err;
+      const message = err instanceof Error ? err.message : "Unknown error";
+      throw new ValidationError(`Failed to parse PDF document: ${message}`);
     }
   }
 }
@@ -158,11 +182,15 @@ export class DeterministicCleaner implements ICleaner {
 }
 
 export class ExtractorRegistry {
-  constructor(private readonly extractors: IExtractor[] = [new PdfExtractor(), new DocxExtractor(), new TextExtractor()]) {}
+  private readonly extractors: IExtractor[];
+  constructor(extractors: IExtractor[] = [new PdfExtractor(), new DocxExtractor(), new TextExtractor()]) {
+    this.extractors = extractors;
+  }
 
-  extract(filename: string, mimeType: string, buffer: Buffer): ExtractionResult {
+  async extract(filename: string, mimeType: string, buffer: Buffer): Promise<ExtractionResult> {
     const extractor = this.extractors.find((candidate) => candidate.supports(filename, mimeType));
     if (!extractor) throw new UnsupportedFileTypeError(`No extractor is registered for ${filename} (${mimeType}).`);
     return extractor.extract(buffer);
   }
 }
+

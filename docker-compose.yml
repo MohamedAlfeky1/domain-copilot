@@ -42,7 +42,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DATABASE_URL: postgresql://postgres:postgrespassword@postgres:5432/domain_copilot
       USE_EMBEDDED_DB: "false"
-      JWT_SECRET: ${JWT_SECRET:-domain-copilot-assessment-secure-jwt-key-32-chars}
+      JWT_SECRET: ${JWT_SECRET}
       INGESTION_STAGING_DIR: /data/staging
     volumes:
       - ingestion_staging:/data
