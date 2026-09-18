@@ -296,10 +296,13 @@ export class GeminiEmbeddingAdapter implements IAIProviderPort {
   }
 
   private async postJsonWithRetry(url: string, payload: unknown): Promise<any> {
-    const maxAttempts = 5;
+    const maxAttempts = 8;
     let lastError: any;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      let is429 = false;
+      let suggestedDelayMs = 0;
+
       try {
         const response = await fetch(url, {
           method: "POST",
@@ -312,12 +315,34 @@ export class GeminiEmbeddingAdapter implements IAIProviderPort {
         }
 
         const errBody = await response.json().catch(() => ({}));
+        const message = errBody?.error?.message || response.statusText;
         const error = {
           status: response.status,
-          message: errBody?.error?.message || response.statusText,
+          message,
           body: errBody,
         };
-        if (response.status !== 429 && response.status < 500) {
+
+        if (response.status === 429) {
+          is429 = true;
+          const retryInfo = errBody?.error?.details?.find((d: any) =>
+            d["@type"]?.includes("RetryInfo")
+          );
+          if (retryInfo?.retryDelay) {
+            const parsed = parseFloat(String(retryInfo.retryDelay).replace("s", ""));
+            if (!isNaN(parsed) && parsed > 0) {
+              suggestedDelayMs = Math.ceil(parsed * 1000);
+            }
+          }
+          if (!suggestedDelayMs) {
+            const match = message.match(/retry in\s+([\d.]+)\s*s/i);
+            if (match && match[1]) {
+              const parsed = parseFloat(match[1]);
+              if (!isNaN(parsed) && parsed > 0) {
+                suggestedDelayMs = Math.ceil(parsed * 1000);
+              }
+            }
+          }
+        } else if (response.status < 500) {
           throw error;
         }
         lastError = error;
@@ -325,11 +350,19 @@ export class GeminiEmbeddingAdapter implements IAIProviderPort {
         if (error?.status && error.status !== 429 && error.status < 500) {
           throw error;
         }
+        if (error?.status === 429) {
+          is429 = true;
+        }
         lastError = error;
       }
 
       if (attempt < maxAttempts - 1) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+        let waitMs = 1000 * 2 ** attempt;
+        if (is429) {
+          waitMs = Math.max(suggestedDelayMs ? suggestedDelayMs + 2000 : 8000, 10000 * Math.min(6, attempt + 1));
+          console.warn(`[GeminiEmbeddingAdapter] 429 Rate limit / quota exceeded. Waiting ${(waitMs / 1000).toFixed(1)}s before retry ${attempt + 2}/${maxAttempts}...`);
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
       }
     }
 
