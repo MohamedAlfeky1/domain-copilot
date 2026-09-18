@@ -2,9 +2,9 @@ name: CI & Quality Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [main, pr-develop]
   pull_request:
-    branches: [main]
+    branches: [main, pr-develop]
 
 jobs:
   build-and-verify:
