@@ -143,7 +143,7 @@ export class MultiAgentOrchestrator {
       try {
         const result = await Promise.race([
           this.aiProvider.generateCompletion(messages, {
-            model: options?.model || "gpt-4o",
+            model: options?.model,
             temperature: options?.temperature ?? 0.1,
             tools: toolDefs.length > 0 ? toolDefs : undefined,
           }),
@@ -354,7 +354,7 @@ export class MultiAgentOrchestrator {
             finalSynthesis += token;
             emitEvent?.({ type: "token", token });
           },
-          { model: "gpt-4o", signal }
+          { signal }
         ),
         streamTimeout.promise,
       ]);
@@ -501,7 +501,7 @@ export class MultiAgentOrchestrator {
         s1Prompt,
         ExtractorOutputSchema,
         runId,
-        { model: "gpt-4o", temperature: 0.1 }
+        { temperature: 0.1 }
       );
 
       await this.completeStep(s1Step, { findings: extractorOutput }, Date.now() - startS1, emitEvent);
@@ -521,7 +521,7 @@ export class MultiAgentOrchestrator {
         s2Prompt,
         AuditorOutputSchema,
         runId,
-        { model: "gpt-4o", temperature: 0.1 }
+        { temperature: 0.1 }
       );
 
       await this.completeStep(s2Step, { audit: auditorOutput }, Date.now() - startS2, emitEvent);

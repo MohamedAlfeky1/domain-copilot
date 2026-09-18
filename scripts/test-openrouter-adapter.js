@@ -42,6 +42,9 @@ const {
 } = require("../src/infrastructure/ai/openrouter.adapter.ts");
 const { OpenAIProviderAdapter } = require("../src/infrastructure/ai/openai.adapter.ts");
 const { ProviderFailureError } = require("../src/core/domain/errors.ts");
+const {
+  MultiAgentOrchestrator,
+} = require("../src/core/application/agents/orchestrator.service.ts");
 
 async function runOpenRouterTests() {
   console.log("================================================================================");
@@ -563,6 +566,149 @@ async function runOpenRouterTests() {
       const provider = resolveAIProvider();
       assert(provider instanceof OpenAIProviderAdapter);
       assert.strictEqual(provider.providerName, "openai");
+    });
+
+    // -------------------------------------------------------------------------
+    // J. Orchestrator Model Selection Preservation (No Hardcoded gpt-4o)
+    // -------------------------------------------------------------------------
+    await test("Scenario J1: Orchestrator passes undefined model, preserving OpenRouter configured model (e.g. gemma-4-31b-it:free)", async () => {
+      const freeModel = "google/gemma-4-31b-it:free";
+      const adapter = new OpenRouterProviderAdapter({
+        apiKey: "sk-or-test-key",
+        defaultModel: freeModel,
+      });
+
+      const capturedModels = [];
+      adapter.setCustomTransport({
+        async chatCompletion(params) {
+          capturedModels.push(params.model);
+          const isAuditor = params.messages.some((m) => m.content.includes("Auditor"));
+          const content = isAuditor
+            ? JSON.stringify({
+                verifiedFacts: ["Fact 1 verified"],
+                riskFlags: [],
+                domainComplianceApproved: true,
+                requiresHumanReview: false,
+              })
+            : JSON.stringify({
+                extractedFacts: [{ statement: "Fact 1", chunkId: "c1", confidence: 0.95 }],
+                relevantSections: ["Section 1"],
+                dataCompleteness: "HIGH",
+              });
+
+          return {
+            choices: [{ message: { content } }],
+            usage: { prompt_tokens: 15, completion_tokens: 20 },
+          };
+        },
+        async streamCompletion(params, onToken) {
+          capturedModels.push(params.model);
+          onToken("streamed synthesis token");
+          return {
+            text: JSON.stringify({ synthesis: "Streamed answer", citations: [] }),
+            promptTokens: 15,
+            completionTokens: 20,
+          };
+        },
+      });
+
+      const mockDb = {
+        saveRunStep: async (s) => ({ id: "step-1", ...s }),
+        updateRunStep: async () => {},
+        recordUsage: async () => {},
+        updateRunStatus: async () => {},
+        saveApprovalRequest: async () => ({ id: "app-1", status: "PENDING" }),
+      };
+      const mockRetriever = {
+        retrieve: async () => ({
+          chunks: [{ id: "c1", text: "Grounded evidence", page: 1, section: "1" }],
+          rankedEvidence: [{ chunkId: "c1", content: "Grounded evidence", finalScore: 0.9, isRefusal: false }],
+          citations: [{ citationIndex: 1, documentTitle: "Doc 1", versionNumber: 1, sectionNumber: "1", pageNumber: 1, chunkId: "c1", excerpt: "Grounded evidence" }],
+          evidenceScores: [0.9],
+          isRefusal: false,
+          trace: { query: "test", candidateCount: 1, fusedResults: [{ chunkId: "c1", rrfScore: 0.03 }] },
+        }),
+      };
+      const mockTools = {
+        getToolsForAgent: () => [],
+        getToolNamesForAgent: () => [],
+        executeTool: async () => ({ outcome: {} }),
+        setTwistPort: () => {},
+      };
+      const mockApproval = {
+        createPendingApproval: async () => ({ id: "app-1", status: "PENDING" }),
+      };
+      const mockTwist = {
+        twistName: "Test Twist",
+        evaluateRiskGuard: () => ({ isPermitted: true, violations: [] }),
+      };
+
+      const orchestrator = new MultiAgentOrchestrator(
+        mockDb,
+        adapter,
+        mockRetriever,
+        mockTools,
+        mockApproval,
+        mockTwist
+      );
+
+      await orchestrator.runWorkflow(
+        "run-test-openrouter",
+        "What are the dosage rules?",
+        "session-test",
+        "corr-test",
+        () => {}
+      );
+
+      assert(capturedModels.length > 0, "Orchestrator must invoke AI provider");
+      assert(
+        capturedModels.every((m) => m === freeModel),
+        `All calls must use OpenRouter model '${freeModel}', but got: ${JSON.stringify(capturedModels)}`
+      );
+      assert(
+        !capturedModels.includes("gpt-4o"),
+        "Orchestrator must NEVER force 'gpt-4o' when using OpenRouter"
+      );
+    });
+
+    await test("Scenario J2: Orchestrator preserves AI_MODEL when using OpenAI adapter", async () => {
+      const customModel = "gpt-4o-2024-08-06";
+      const adapter = new OpenAIProviderAdapter("sk-test-key", customModel);
+
+      let capturedModel = null;
+      adapter.client = {
+        chat: {
+          completions: {
+            create: async (params) => {
+              capturedModel = params.model;
+              return {
+                choices: [{ message: { content: "OK" } }],
+                usage: { prompt_tokens: 5, completion_tokens: 5 },
+              };
+            },
+          },
+        },
+      };
+
+      // When options?.model is omitted, adapter defaults to customModel
+      await adapter.generateCompletion([{ role: "user", content: "test" }], { temperature: 0.1 });
+      assert.strictEqual(capturedModel, customModel);
+    });
+
+    await test("Scenario J3: Static check guarantees zero hardcoded 'gpt-4o' in orchestrator model-selection paths", async () => {
+      const orchestratorSource = fs.readFileSync(
+        path.resolve(__dirname, "../src/core/application/agents/orchestrator.service.ts"),
+        "utf8"
+      );
+
+      assert(
+        !orchestratorSource.includes('model: "gpt-4o"'),
+        "orchestrator.service.ts must not contain { model: 'gpt-4o' }"
+      );
+      assert(
+        !orchestratorSource.includes('options?.model || "gpt-4o"'),
+        "orchestrator.service.ts must not default options?.model to 'gpt-4o'"
+      );
     });
   } finally {
     // Restore environment
