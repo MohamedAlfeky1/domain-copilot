@@ -87,4 +87,6 @@ export interface IAIProviderPort extends IEmbeddingProviderPort {
     texts: string[],
     options?: { model?: string; taskType?: "RETRIEVAL_QUERY" | "RETRIEVAL_DOCUMENT" | string }
   ): Promise<Array<{ embedding: number[]; dimension: number; model: string }>>;
+
+  calculateCost?(promptTokens: number, completionTokens: number): number;
 }

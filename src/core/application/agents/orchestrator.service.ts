@@ -95,6 +95,16 @@ function createStepTimeout(ms: number, agentName: string): { promise: Promise<ne
   return { promise, clear };
 }
 
+declare global {
+  var __orchestratorPausedStatesInstance: Map<string, PausedWorkflowState> | undefined;
+}
+
+const globalPausedStates =
+  globalThis.__orchestratorPausedStatesInstance ?? new Map<string, PausedWorkflowState>();
+if (process.env.NODE_ENV !== "production") {
+  globalThis.__orchestratorPausedStatesInstance = globalPausedStates;
+}
+
 export class MultiAgentOrchestrator {
   private readonly MAX_ITERATIONS = 5;
   private readonly STEP_TIMEOUT_MS = 30000;
@@ -103,7 +113,7 @@ export class MultiAgentOrchestrator {
    * In-memory store for paused workflow state.
    * Keyed by runId. Cleared on resume or failure.
    */
-  private pausedStates: Map<string, PausedWorkflowState> = new Map();
+  private pausedStates: Map<string, PausedWorkflowState> = globalPausedStates;
 
   constructor(
     private db: IDatabasePort,
@@ -382,9 +392,10 @@ export class MultiAgentOrchestrator {
 
     // Record Cost & Tokens (OBS-002)
     const totalTokens = totalPromptTokens + totalCompletionTokens;
-    const promptCost = (totalPromptTokens / 1_000_000) * 2.50;
-    const completionCost = (totalCompletionTokens / 1_000_000) * 10.00;
-    const totalCostUsd = promptCost + completionCost;
+    const totalCostUsd =
+      typeof this.aiProvider.calculateCost === "function"
+        ? this.aiProvider.calculateCost(totalPromptTokens, totalCompletionTokens)
+        : (totalPromptTokens / 1_000_000) * 2.50 + (totalCompletionTokens / 1_000_000) * 10.00;
 
     await this.db.recordUsage({
       id: `usage-${runId}`,
@@ -402,6 +413,10 @@ export class MultiAgentOrchestrator {
 
     // Mark Run Completed
     const finalAnswer = drafterOutput.synthesis;
+    const completedRun = await this.db.getRunById(runId);
+    if (completedRun) {
+      completedRun.citations = retrievalCitations;
+    }
     await this.db.updateRunStatus(runId, "COMPLETED", undefined, finalAnswer);
     emitEvent?.({
       type: "done",
@@ -445,6 +460,12 @@ export class MultiAgentOrchestrator {
       const retStep = await this.createStep(runId, ++stepIndex, "Retrieval Engine", "RETRIEVAL", emitEvent, { query, filters });
       const retrievalResult: RetrievalResult = await this.retriever.retrieve(query, filters, correlationId);
       await this.completeStep(retStep, retrievalResult.trace, Date.now() - startRet, emitEvent);
+
+      // Persist citations on run record for inspection / rehydration
+      const runForCitations = await this.db.getRunById(runId);
+      if (runForCitations) {
+        runForCitations.citations = retrievalResult.citations;
+      }
 
       // Emit citations immediately
       for (const cite of retrievalResult.citations) {
@@ -708,7 +729,34 @@ export class MultiAgentOrchestrator {
     emitEvent?: (event: AgentProgressEvent) => void,
     signal?: AbortSignal
   ): Promise<WorkflowResult> {
-    const pausedState = this.pausedStates.get(runId);
+    let pausedState = this.pausedStates.get(runId);
+    if (!pausedState) {
+      const approvalRec = await this.db.getApprovalById(approvalId);
+      const runRec = await this.db.getRunById(runId);
+      if (approvalRec && runRec && approvalRec.originalPayload) {
+        const payload = approvalRec.originalPayload as any;
+        if (payload.auditorOutput) {
+          pausedState = {
+            runId,
+            query: runRec.query,
+            sessionId: runRec.sessionId,
+            correlationId: runRec.correlationId,
+            extractorOutput: payload.extractorOutput,
+            auditorOutput: payload.auditorOutput,
+            evidenceContext: payload.evidenceContext || "",
+            retrievalCitations: runRec.citations || [],
+            evidenceScores: [],
+            approvalId: approvalRec.id,
+            stepIndex: 5,
+            totalPromptTokens: 0,
+            totalCompletionTokens: 0,
+            filters: runRec.filters as any,
+          };
+          this.pausedStates.set(runId, pausedState);
+        }
+      }
+    }
+
     if (!pausedState) {
       throw new ValidationError(
         `No paused workflow found for run "${runId}". The run may have already completed or expired.`

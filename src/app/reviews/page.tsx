@@ -54,6 +54,12 @@ export default function ReviewsPage() {
         body: JSON.stringify({ comment }),
       });
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const targetRunId = data.approval?.runId || selectedApproval.runId;
+        if (targetRunId) {
+          window.location.href = `/copilot?runId=${encodeURIComponent(targetRunId)}&resume=true`;
+          return;
+        }
         alert("Action approved and executed successfully!");
         fetchApprovals();
       }
@@ -72,6 +78,12 @@ export default function ReviewsPage() {
         body: JSON.stringify({ modifiedPayload: parsed, comment }),
       });
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const targetRunId = data.approval?.runId || selectedApproval.runId;
+        if (targetRunId) {
+          window.location.href = `/copilot?runId=${encodeURIComponent(targetRunId)}&resume=true`;
+          return;
+        }
         alert("Modified payload approved and executed!");
         fetchApprovals();
       }

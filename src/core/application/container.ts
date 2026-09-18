@@ -62,5 +62,15 @@ export const buildContainer = (): AppContainer => {
   };
 };
 
-export const container: AppContainer = buildContainer();
+declare global {
+  var __appContainerInstance: AppContainer | undefined;
+}
+
+export const container: AppContainer =
+  globalThis.__appContainerInstance ?? buildContainer();
+
+if (process.env.NODE_ENV !== "production") {
+  globalThis.__appContainerInstance = container;
+}
+
 

@@ -36,6 +36,7 @@ const {
   SUPPORTED_AI_PROVIDERS,
 } = require("../src/infrastructure/ai/ai-provider.factory.ts");
 const { OpenAIProviderAdapter } = require("../src/infrastructure/ai/openai.adapter.ts");
+const { OllamaProviderAdapter } = require("../src/infrastructure/ai/ollama.adapter.ts");
 const { container, buildContainer } = require("../src/core/application/container.ts");
 
 async function runProviderFactoryTests() {
@@ -98,6 +99,27 @@ async function runProviderFactoryTests() {
     assert.strictEqual(provider.providerName, "openai");
   });
 
+  await test("A5. AI_PROVIDER=ollama environment variable selects Ollama adapter", () => {
+    process.env.AI_PROVIDER = "ollama";
+    delete process.env.OLLAMA_MODEL;
+    const provider = resolveAIProvider();
+
+    assert.ok(provider, "Provider must be returned");
+    assert.strictEqual(provider.providerName, "ollama");
+    assert.ok(provider instanceof OllamaProviderAdapter, "Must be an instance of OllamaProviderAdapter");
+    assert.strictEqual(provider.getModelName(), "qwen3:8b");
+  });
+
+  await test("A6. Explicit config parameter { provider: 'ollama' } selects Ollama adapter with model override", () => {
+    delete process.env.AI_PROVIDER;
+    const provider = resolveAIProvider({ provider: "ollama", model: "qwen3:8b-custom" });
+
+    assert.ok(provider);
+    assert.strictEqual(provider.providerName, "ollama");
+    assert.ok(provider instanceof OllamaProviderAdapter);
+    assert.strictEqual(provider.getModelName(), "qwen3:8b-custom");
+  });
+
   // ---------------------------------------------------------------------------
   // Test B: Invalid provider value -> clear configuration error
   // ---------------------------------------------------------------------------
@@ -113,7 +135,7 @@ async function runProviderFactoryTests() {
           `Expected message to include unsupported provider, got: ${err.message}`
         );
         assert.ok(
-          err.message.includes("Supported providers: openai, openrouter"),
+          err.message.includes("Supported providers: openai, openrouter, ollama"),
           `Expected message to list supported providers, got: ${err.message}`
         );
         return true;
