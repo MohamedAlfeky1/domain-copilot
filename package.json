@@ -24,6 +24,7 @@
     "reindex:gemini": "node scripts/reindex-gemini.js",
     "test:security": "node scripts/test-security.js",
     "test:corpus": "node scripts/test-corpus.js",
+    "test:eval": "node scripts/test-eval-harness.js",
     "eval": "node scripts/eval-runner.js",
     "eval:twist": "node scripts/eval-twist.js",
     "eval:report": "node scripts/eval-report.js",
