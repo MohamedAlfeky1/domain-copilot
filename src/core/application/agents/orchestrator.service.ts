@@ -48,6 +48,7 @@ export interface AgentProgressEvent {
   message?: string;
   data?: unknown;
   token?: string;
+  finalAnswer?: string;
 }
 
 export type WorkflowResult = {
@@ -105,9 +106,13 @@ if (process.env.NODE_ENV !== "production") {
   globalThis.__orchestratorPausedStatesInstance = globalPausedStates;
 }
 
+export interface MultiAgentOrchestratorOptions {
+  stepTimeoutMs?: number;
+}
+
 export class MultiAgentOrchestrator {
   private readonly MAX_ITERATIONS = 5;
-  private readonly STEP_TIMEOUT_MS = 30000;
+  private readonly stepTimeoutMs: number;
 
   /**
    * In-memory store for paused workflow state.
@@ -121,8 +126,13 @@ export class MultiAgentOrchestrator {
     private retriever: HybridRetrievalService,
     private tools: ToolRegistry,
     private approvalService: ApprovalService,
-    private twistPort: ITwistPort
-  ) {}
+    private twistPort: ITwistPort,
+    options?: MultiAgentOrchestratorOptions
+  ) {
+    this.stepTimeoutMs =
+      options?.stepTimeoutMs ??
+      (process.env.STEP_TIMEOUT_MS ? parseInt(process.env.STEP_TIMEOUT_MS, 10) : 30000);
+  }
 
   /**
    * Check if a run is paused awaiting approval.
@@ -134,13 +144,13 @@ export class MultiAgentOrchestrator {
   /**
    * Execute a single agent step with tool-calling loop.
    * Bounded by MAX_ITERATIONS to prevent infinite loops.
-   * Each iteration enforced by STEP_TIMEOUT_MS.
+   * Each iteration enforced by stepTimeoutMs.
    */
   private async executeAgentWithTools(
     agentName: string,
     systemPrompt: string,
     runId: string,
-    options?: { model?: string; temperature?: number }
+    options?: { model?: string; temperature?: number; maxTokens?: number }
   ): Promise<string> {
     const toolDefs = this.tools.getToolsForAgent(agentName);
     const messages: CompletionMessage[] = [
@@ -148,13 +158,14 @@ export class MultiAgentOrchestrator {
     ];
 
     for (let iteration = 0; iteration < this.MAX_ITERATIONS; iteration++) {
-      const timeout = createStepTimeout(this.STEP_TIMEOUT_MS, agentName);
+      const timeout = createStepTimeout(this.stepTimeoutMs, agentName);
 
       try {
         const result = await Promise.race([
           this.aiProvider.generateCompletion(messages, {
             model: options?.model,
             temperature: options?.temperature ?? 0.1,
+            maxTokens: options?.maxTokens,
             tools: toolDefs.length > 0 ? toolDefs : undefined,
           }),
           timeout.promise,
@@ -222,7 +233,7 @@ export class MultiAgentOrchestrator {
     systemPrompt: string,
     schema: import("zod").ZodSchema<T>,
     runId: string,
-    options?: { model?: string; temperature?: number }
+    options?: { model?: string; temperature?: number; maxTokens?: number }
   ): Promise<{ validated: T; rawText: string }> {
     let lastError: Error | null = null;
 
@@ -351,7 +362,7 @@ export class MultiAgentOrchestrator {
 
     let finalSynthesis = "";
     let streamRes: CompletionResult | undefined;
-    const streamTimeout = createStepTimeout(this.STEP_TIMEOUT_MS, specialists[2]);
+    const streamTimeout = createStepTimeout(this.stepTimeoutMs, specialists[2]);
 
     try {
       streamRes = await Promise.race([
@@ -420,10 +431,12 @@ export class MultiAgentOrchestrator {
     await this.db.updateRunStatus(runId, "COMPLETED", undefined, finalAnswer);
     emitEvent?.({
       type: "done",
+      finalAnswer,
       data: {
         totalTokens,
         totalCostUsd,
         citationsCount: retrievalCitations.length,
+        finalAnswer,
       },
     });
 
@@ -522,7 +535,7 @@ export class MultiAgentOrchestrator {
         s1Prompt,
         ExtractorOutputSchema,
         runId,
-        { temperature: 0.1 }
+        { temperature: 0.1, maxTokens: 600 }
       );
 
       await this.completeStep(s1Step, { findings: extractorOutput }, Date.now() - startS1, emitEvent);

@@ -31,6 +31,43 @@ interface ApprovalInfo {
   status?: string;
 }
 
+/**
+ * Presentation normalization helper.
+ * If the value is already plain text, returns it unchanged.
+ * If the value is a JSON string or object containing { "synthesis": "..." },
+ * extracts and returns only the synthesis text.
+ * If parsing fails, returns the original text.
+ */
+function normalizeDisplayText(raw: unknown): string {
+  if (typeof raw !== "string") {
+    if (raw && typeof raw === "object" && "synthesis" in (raw as any) && typeof (raw as any).synthesis === "string") {
+      return (raw as any).synthesis;
+    }
+    return raw ? String(raw) : "";
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+
+  if (trimmed.startsWith("{") && trimmed.includes('"synthesis"')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed.synthesis === "string") {
+        return parsed.synthesis;
+      }
+    } catch {
+      const match = trimmed.match(/"synthesis"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      if (match) {
+        try {
+          return JSON.parse(`"${match[1]}"`);
+        } catch {}
+      }
+    }
+  }
+
+  return raw;
+}
+
 export default function CopilotPage() {
   const [query, setQuery] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -40,6 +77,7 @@ export default function CopilotPage() {
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
   const [isRefused, setIsRefused] = useState(false);
   const [refusalMessage, setRefusalMessage] = useState("");
+  const [accessDeniedMessage, setAccessDeniedMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   // HITL approval state
@@ -191,11 +229,16 @@ export default function CopilotPage() {
               } else if (eventType === "done") {
                 setStreaming(false);
                 setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" })));
-                if (data.finalAnswer) {
-                  setStreamedText(data.finalAnswer);
+                const cleanAnswer = data.finalAnswer || data.data?.finalAnswer;
+                if (cleanAnswer) {
+                  setStreamedText(normalizeDisplayText(cleanAnswer));
+                } else {
+                  setStreamedText((prev) => normalizeDisplayText(prev));
                 }
                 if (Array.isArray(data.citations) && data.citations.length > 0) {
                   setCitations(data.citations);
+                } else if (Array.isArray(data.data?.citations) && data.data.citations.length > 0) {
+                  setCitations(data.data.citations);
                 }
                 try {
                   localStorage.removeItem("copilot_active_run_id");
@@ -257,11 +300,30 @@ export default function CopilotPage() {
       try {
         const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
         if (!res.ok) {
+          if (res.status === 401) {
+            const currentPath = window.location.pathname + window.location.search;
+            window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
+            return;
+          }
+
+          let errMessage = `Failed to load run (HTTP ${res.status})`;
+          try {
+            const errData = await res.json();
+            if (errData?.error) errMessage = errData.error;
+          } catch {}
+
           if (res.status === 404) {
             try {
               localStorage.removeItem("copilot_active_run_id");
             } catch {}
+            errMessage = "The requested run was not found.";
           }
+
+          if (isCancelled) return;
+          setAccessDeniedMessage(errMessage);
+          setStreaming(false);
+          setIsAwaitingApproval(false);
+          setPendingApproval(null);
           return;
         }
 
@@ -280,7 +342,7 @@ export default function CopilotPage() {
 
         const answerText = run.finalOutput || run.answer;
         if (answerText) {
-          setStreamedText(answerText);
+          setStreamedText(normalizeDisplayText(answerText));
         }
 
         if (run.status === "COMPLETED") {
@@ -378,6 +440,7 @@ export default function CopilotPage() {
     setCitations([]);
     setIsRefused(false);
     setRefusalMessage("");
+    setAccessDeniedMessage(null);
     setPendingApproval(null);
     setIsAwaitingApproval(false);
     setSelectedCitation(null);
@@ -500,9 +563,24 @@ export default function CopilotPage() {
         sse.close();
       });
 
-      sse.addEventListener("done", () => {
+      sse.addEventListener("done", (evt: any) => {
         setStreaming(false);
         setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" })));
+        if (evt?.data) {
+          try {
+            const data = JSON.parse(evt.data);
+            const cleanAnswer = data.finalAnswer || data.data?.finalAnswer;
+            if (cleanAnswer) {
+              setStreamedText(normalizeDisplayText(cleanAnswer));
+            } else {
+              setStreamedText((prev) => normalizeDisplayText(prev));
+            }
+          } catch {
+            setStreamedText((prev) => normalizeDisplayText(prev));
+          }
+        } else {
+          setStreamedText((prev) => normalizeDisplayText(prev));
+        }
         try {
           localStorage.removeItem("copilot_active_run_id");
         } catch {}
@@ -566,6 +644,7 @@ export default function CopilotPage() {
     setSelectedCitation(null);
     setIsRefused(false);
     setRefusalMessage("");
+    setAccessDeniedMessage(null);
     setPendingApproval(null);
     setIsAwaitingApproval(false);
     setTwistEvaluation(null);
@@ -583,7 +662,7 @@ export default function CopilotPage() {
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(streamedText);
+    navigator.clipboard.writeText(normalizeDisplayText(streamedText));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -657,7 +736,27 @@ export default function CopilotPage() {
 
         {/* Answer Content Panel */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4 font-sans text-sm leading-relaxed bg-slate-50/30 flex flex-col">
-          {streamedText.length === 0 && !isRefused && !isAwaitingApproval && (
+          {accessDeniedMessage && (
+            <Card className="border-rose-200 bg-rose-50/50 p-4 shadow-xs space-y-2">
+              <div className="flex items-center gap-2 font-semibold text-rose-800 text-xs">
+                <AppIcons.warning className="w-4 h-4 text-rose-600" />
+                <span>Access Restricted</span>
+              </div>
+              <p className="text-xs text-rose-700 leading-normal">{accessDeniedMessage}</p>
+              <div className="pt-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs border-rose-300 text-rose-800 hover:bg-rose-100/50 shadow-2xs"
+                  onClick={handleNewQuery}
+                >
+                  Start New Query
+                </Button>
+              </div>
+            </Card>
+          )}
+
+          {streamedText.length === 0 && !isRefused && !isAwaitingApproval && !accessDeniedMessage && (
             <div className="flex-1 flex flex-col items-center justify-center text-center py-12 px-4 select-none">
               <AppIcons.copilot
                 className="w-7 h-7 text-sky-500 mb-3.5 shrink-0"
@@ -778,7 +877,7 @@ export default function CopilotPage() {
           {streamedText && (
             <Card className="p-5 shadow-xs border-slate-200 bg-card">
               <div className="prose prose-slate max-w-none text-slate-800 leading-relaxed whitespace-pre-wrap text-sm" dir="auto">
-                {streamedText}
+                {normalizeDisplayText(streamedText)}
               </div>
             </Card>
           )}

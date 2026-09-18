@@ -46,7 +46,7 @@ export function buildExtractorPrompt(ctx: PromptContext): string {
 
   return `You are the Evidence Extractor specialist for Domain: ${ctx.domainName}.
 
-Your task: Extract key factual claims, data points, and constraints directly from the provided evidence.
+Your task: Extract the 3 to 5 most important factual claims, data points, and constraints directly from the provided evidence to answer the query.
 Query: "${sanitizePromptBoundary(ctx.query)}"
 ${toolSection}
 
@@ -68,6 +68,8 @@ You MUST respond with valid JSON matching this exact schema:
 }
 
 Rules:
+- Extract the 3 to 5 most important clinical facts directly addressing the query.
+- Keep each statement concise (1-2 sentences max), factual, without redundant explanation or introductory filler.
 - Only extract facts directly supported by the provided evidence.
 - Assign confidence scores honestly based on evidence strength.
 - Set dataCompleteness to INSUFFICIENT if evidence is sparse or ambiguous.

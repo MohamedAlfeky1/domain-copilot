@@ -121,6 +121,20 @@ async function runOllamaTests() {
       delete process.env.OLLAMA_THINK;
     });
 
+    await test("1.5 Model residency keep_alive defaults to '30m' and can be overridden by config and OLLAMA_KEEP_ALIVE", () => {
+      delete process.env.OLLAMA_KEEP_ALIVE;
+      const defaultAdapter = new OllamaProviderAdapter();
+      assert.strictEqual(defaultAdapter.getKeepAlive(), "30m");
+
+      const customConfigAdapter = new OllamaProviderAdapter({ keepAlive: "1h" });
+      assert.strictEqual(customConfigAdapter.getKeepAlive(), "1h");
+
+      process.env.OLLAMA_KEEP_ALIVE = "45m";
+      const envAdapter = new OllamaProviderAdapter();
+      assert.strictEqual(envAdapter.getKeepAlive(), "45m");
+      delete process.env.OLLAMA_KEEP_ALIVE;
+    });
+
     // ------------------------------------------------------------------------
     // Scenario 2: Factory Selection & Model Selection
     // ------------------------------------------------------------------------
@@ -225,6 +239,7 @@ async function runOllamaTests() {
       assert(capturedParams !== null);
       assert.strictEqual(capturedParams.model, "qwen3:8b");
       assert.strictEqual(capturedParams.think, false, "generateCompletion must send think: false by default");
+      assert.strictEqual(capturedParams.keep_alive, "30m", "generateCompletion must send keep_alive: 30m");
       assert.strictEqual(capturedParams.options.temperature, 0.2);
       assert.strictEqual(capturedParams.options.num_predict, 500);
       assert.strictEqual(capturedParams.messages.length, 2);
@@ -294,6 +309,7 @@ async function runOllamaTests() {
       assert.strictEqual(result.totalTokens, 35);
       assert(capturedStreamParams !== null);
       assert.strictEqual(capturedStreamParams.think, false, "streamCompletion must send think: false by default");
+      assert.strictEqual(capturedStreamParams.keep_alive, "30m", "streamCompletion must send keep_alive: 30m");
     });
 
     await test("4.2 options.think overrides default think mode in streamCompletion", async () => {

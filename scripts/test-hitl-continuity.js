@@ -291,6 +291,86 @@ async function runHitlContinuityTestSuite() {
     assert.notStrictEqual(approverResume.status, 403, "APPROVER must pass role check on resume endpoint");
   });
 
+  // 11. Approver Rehydration & Isolation of Unapproved Runs
+  await testCase("CONT-011", "APPROVER can rehydrate run associated with HITL approval, while unapproved runs remain forbidden (403)", async () => {
+    // 1. Create a run with an associated approval
+    const queryRes = await request("/api/queries", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${expertToken}` },
+      body: { query: "HITL continuity rehydration check" },
+    });
+    const runId = queryRes.data.runId;
+
+    await request("/api/approvals", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: {
+        runId,
+        proposedAction: "Review HITL rehydration protocol",
+        riskLevel: "CRITICAL",
+        payload: { action: "dispense_restricted_drug" },
+      },
+    });
+
+    // 2. APPROVER rehydrates the run associated with the approval (must return 200)
+    const approverRehydrate = await request(`/api/runs/${runId}`, {
+      headers: { Authorization: `Bearer ${approverToken}` },
+    });
+    assert.strictEqual(approverRehydrate.status, 200, "APPROVER must be able to rehydrate run with associated approval");
+    assert.strictEqual(approverRehydrate.data.run.id, runId);
+    assert.ok(approverRehydrate.data.approval, "Rehydrated data must contain approval object");
+
+    // 3. Create an unrelated run with NO approval
+    const unrelatedRes = await request("/api/queries", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${expertToken}` },
+      body: { query: "Unrelated standard query without approval" },
+    });
+    const unrelatedRunId = unrelatedRes.data.runId;
+
+    // 4. APPROVER is denied (403) from inspecting the unrelated run
+    const approverDenied = await request(`/api/runs/${unrelatedRunId}`, {
+      headers: { Authorization: `Bearer ${approverToken}` },
+    });
+    assert.strictEqual(approverDenied.status, 403, "APPROVER must be forbidden (403) from inspecting run with no approval");
+
+    // 5. VIEWER is denied (403) even with approval
+    const viewerDenied = await request(`/api/runs/${runId}`, {
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
+    assert.strictEqual(viewerDenied.status, 403, "VIEWER must be forbidden (403) from inspecting run");
+
+    // 6. Unauthenticated is denied (401)
+    const unauthDenied = await request(`/api/runs/${runId}`);
+    assert.strictEqual(unauthDenied.status, 401, "Unauthenticated request must be rejected with 401");
+  });
+
+  // 12. Final Answer Presentation Normalization
+  await testCase("CONT-012", "Final answer contract provides clean synthesis text and never raw JSON container", async () => {
+    // Check completed runs in the system to verify answer format
+    const approvalsRes = await request("/api/approvals", {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    const approvals = approvalsRes.data?.approvals || [];
+    const decidedApproval = approvals.find((a) => a.status === "APPROVED");
+
+    if (decidedApproval) {
+      const runRes = await request(`/api/runs/${decidedApproval.runId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      if (runRes.data?.run?.status === "COMPLETED") {
+        const answer = runRes.data.run.finalOutput || runRes.data.run.answer || "";
+        assert.ok(answer.length > 0, "Completed run must have a non-empty answer");
+        // Verify answer is clean synthesis, not raw JSON object
+        assert.strictEqual(
+          answer.trim().startsWith('{\n  "synthesis"') || answer.trim().startsWith('{"synthesis"'),
+          false,
+          "Final answer must be clean synthesis text and NOT a raw JSON container"
+        );
+      }
+    }
+  });
+
   console.log("================================================================================");
   console.log(`HITL CONTINUITY SUITE RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log("================================================================================");

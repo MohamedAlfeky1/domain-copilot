@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { container } from "../../core/application/container";
-import { Document, Run, User, UserRole } from "../../core/domain/types";
+import { ApprovalRequest, Document, Run, User, UserRole } from "../../core/domain/types";
 import { ForbiddenError, UnauthorizedError } from "../../core/domain/errors";
 import {
   SESSION_TTL_SECONDS,
@@ -62,12 +62,33 @@ export async function requireRole(req: NextRequest, allowedRoles: UserRole[]): P
   return user;
 }
 
-export function canAccessRun(user: User, run: Run): boolean {
-  return user.role === "ADMIN" || run.ownerId === user.id;
+export function canAccessRun(
+  user: User,
+  run: Run,
+  approval?: ApprovalRequest | ApprovalRequest[] | null
+): boolean {
+  if (user.role === "ADMIN" || run.ownerId === user.id) {
+    return true;
+  }
+  if (user.role === "APPROVER") {
+    if (Array.isArray(approval)) {
+      return approval.some((a) => a && a.runId === run.id);
+    }
+    if (approval && approval.runId === run.id) {
+      return true;
+    }
+  }
+  return false;
 }
 
-export function requireRunAccess(user: User, run: Run): void {
-  if (!canAccessRun(user, run)) throw new ForbiddenError("You do not have access to this run.");
+export function requireRunAccess(
+  user: User,
+  run: Run,
+  approval?: ApprovalRequest | ApprovalRequest[] | null
+): void {
+  if (!canAccessRun(user, run, approval)) {
+    throw new ForbiddenError("You do not have access to this run.");
+  }
 }
 
 export function canManageDocument(user: User, document: Document): boolean {

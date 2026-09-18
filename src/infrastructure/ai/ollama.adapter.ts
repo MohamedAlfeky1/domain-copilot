@@ -26,6 +26,7 @@ export interface OllamaConfig {
   baseUrl?: string;
   defaultModel?: string;
   think?: boolean;
+  keepAlive?: string;
 }
 
 export type OllamaTransport = {
@@ -36,6 +37,7 @@ export type OllamaTransport = {
     tools?: any[];
     stream?: boolean;
     think?: boolean;
+    keep_alive?: string;
   }) => Promise<any>;
   stream?: (
     params: {
@@ -44,6 +46,7 @@ export type OllamaTransport = {
       options?: { temperature?: number; num_predict?: number };
       stream?: boolean;
       think?: boolean;
+      keep_alive?: string;
       signal?: AbortSignal;
     },
     onToken: (token: string) => void
@@ -55,6 +58,7 @@ export class OllamaProviderAdapter implements IAIProviderPort {
   private readonly baseUrl: string;
   private readonly defaultModel: string;
   private readonly think: boolean;
+  private readonly keepAlive: string;
   private readonly embeddingDelegate: IAIProviderPort;
   private customTransport?: OllamaTransport;
 
@@ -75,6 +79,8 @@ export class OllamaProviderAdapter implements IAIProviderPort {
     } else {
       this.think = false; // Safe default for local qwen3:8b to avoid step timeout
     }
+
+    this.keepAlive = config?.keepAlive || process.env.OLLAMA_KEEP_ALIVE || "30m";
 
     this.validateModel(this.defaultModel);
 
@@ -107,6 +113,13 @@ export class OllamaProviderAdapter implements IAIProviderPort {
    */
   getThink(): boolean {
     return this.think;
+  }
+
+  /**
+   * Returns model residency keep_alive duration (defaults to "30m").
+   */
+  getKeepAlive(): string {
+    return this.keepAlive;
   }
 
   /**
@@ -172,12 +185,13 @@ export class OllamaProviderAdapter implements IAIProviderPort {
           model,
           messages: formattedMessages,
           options: {
-            temperature: options?.temperature,
-            num_predict: options?.maxTokens,
+            temperature: options?.temperature ?? 0.1,
+            num_predict: options?.maxTokens ?? 1500,
           },
           tools: toolsParam,
           stream: false,
           think,
+          keep_alive: this.keepAlive,
         });
 
         return this.parseChatResponse(raw, model, messages);
@@ -195,6 +209,7 @@ export class OllamaProviderAdapter implements IAIProviderPort {
           messages: formattedMessages,
           stream: false,
           think,
+          keep_alive: this.keepAlive,
           options: {
             temperature: options?.temperature ?? 0.1,
             num_predict: options?.maxTokens ?? 1500,
@@ -270,11 +285,12 @@ export class OllamaProviderAdapter implements IAIProviderPort {
             model,
             messages: formattedMessages,
             options: {
-              temperature: options?.temperature,
-              num_predict: options?.maxTokens,
+              temperature: options?.temperature ?? 0.1,
+              num_predict: options?.maxTokens ?? 1500,
             },
             stream: true,
             think,
+            keep_alive: this.keepAlive,
             signal: options?.signal,
           },
           onToken
@@ -312,6 +328,7 @@ export class OllamaProviderAdapter implements IAIProviderPort {
           messages: formattedMessages,
           stream: true,
           think,
+          keep_alive: this.keepAlive,
           options: {
             temperature: options?.temperature ?? 0.1,
             num_predict: options?.maxTokens ?? 1500,

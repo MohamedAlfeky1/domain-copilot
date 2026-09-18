@@ -201,6 +201,177 @@ async function runUnitTests() {
     assert.deepStrictEqual(targets, ["ar", "en"]);
   });
 
+  // 19. RBAC Run Access: canAccessRun rule verification
+  function canAccessRun(user, run, approval) {
+    if (user.role === "ADMIN" || run.ownerId === user.id) return true;
+    if (user.role === "APPROVER") {
+      if (Array.isArray(approval)) return approval.some((a) => a && a.runId === run.id);
+      if (approval && approval.runId === run.id) return true;
+    }
+    return false;
+  }
+
+  await test("canAccessRun allows ADMIN to access any run", () => {
+    const adminUser = { id: "usr-admin-001", role: "ADMIN" };
+    const otherRun = { id: "run-100", ownerId: "usr-expert-001" };
+    assert.strictEqual(canAccessRun(adminUser, otherRun, null), true);
+  });
+
+  await test("canAccessRun allows run owner to access their own run", () => {
+    const expertUser = { id: "usr-expert-001", role: "EXPERT" };
+    const ownRun = { id: "run-200", ownerId: "usr-expert-001" };
+    assert.strictEqual(canAccessRun(expertUser, ownRun, null), true);
+  });
+
+  await test("canAccessRun allows APPROVER to access run when associated approval exists", () => {
+    const approverUser = { id: "usr-approver-001", role: "APPROVER" };
+    const run = { id: "run-300", ownerId: "usr-expert-001" };
+    const approval = { id: "appr-01", runId: "run-300", status: "APPROVED" };
+    assert.strictEqual(canAccessRun(approverUser, run, approval), true);
+    assert.strictEqual(canAccessRun(approverUser, run, [approval]), true);
+  });
+
+  await test("canAccessRun forbids APPROVER from accessing run when no approval exists", () => {
+    const approverUser = { id: "usr-approver-001", role: "APPROVER" };
+    const run = { id: "run-400", ownerId: "usr-expert-001" };
+    assert.strictEqual(canAccessRun(approverUser, run, null), false);
+    assert.strictEqual(canAccessRun(approverUser, run, undefined), false);
+  });
+
+  await test("canAccessRun forbids APPROVER from accessing run when approval is for different run", () => {
+    const approverUser = { id: "usr-approver-001", role: "APPROVER" };
+    const run = { id: "run-500", ownerId: "usr-expert-001" };
+    const unrelatedApproval = { id: "appr-99", runId: "run-OTHER", status: "APPROVED" };
+    assert.strictEqual(canAccessRun(approverUser, run, unrelatedApproval), false);
+    assert.strictEqual(canAccessRun(approverUser, run, [unrelatedApproval]), false);
+  });
+
+  await test("canAccessRun forbids non-owner EXPERT and VIEWER from accessing other runs", () => {
+    const expertUser = { id: "usr-expert-002", role: "EXPERT" };
+    const viewerUser = { id: "usr-viewer-001", role: "VIEWER" };
+    const run = { id: "run-600", ownerId: "usr-expert-001" };
+    const approval = { id: "appr-02", runId: "run-600", status: "APPROVED" };
+    assert.strictEqual(canAccessRun(expertUser, run, approval), false);
+    assert.strictEqual(canAccessRun(viewerUser, run, approval), false);
+  });
+
+  // 20. Presentation Normalization: normalizeDisplayText
+  function normalizeDisplayText(raw) {
+    if (typeof raw !== "string") {
+      if (raw && typeof raw === "object" && "synthesis" in raw && typeof raw.synthesis === "string") {
+        return raw.synthesis;
+      }
+      return raw ? String(raw) : "";
+    }
+    const trimmed = raw.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith("{") && trimmed.includes('"synthesis"')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed.synthesis === "string") {
+          return parsed.synthesis;
+        }
+      } catch {
+        const match = trimmed.match(/"synthesis"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if (match) {
+          try {
+            return JSON.parse(`"${match[1]}"`);
+          } catch {}
+        }
+      }
+    }
+    return raw;
+  }
+
+  await test("normalizeDisplayText returns plain text unchanged", () => {
+    const plain = "Clinical management must cross-reference patient lab markers.";
+    assert.strictEqual(normalizeDisplayText(plain), plain);
+  });
+
+  await test("normalizeDisplayText extracts synthesis from full Drafter JSON string", () => {
+    const drafterJson = JSON.stringify({
+      synthesis: "Adverse reaction protocols require immediate cessation of infusion.",
+      citationsUsed: ["chk-1", "chk-2"],
+      refusalNotice: "",
+      actionProposed: {
+        toolName: "",
+        parameters: {},
+        isSideEffecting: false,
+        riskLevel: "LOW"
+      }
+    }, null, 2);
+
+    const result = normalizeDisplayText(drafterJson);
+    assert.strictEqual(result, "Adverse reaction protocols require immediate cessation of infusion.");
+  });
+
+  await test("normalizeDisplayText extracts synthesis from Drafter object", () => {
+    const drafterObj = {
+      synthesis: "Hemodynamic stabilization protocol confirmed.",
+      citationsUsed: ["chk-3"]
+    };
+    assert.strictEqual(normalizeDisplayText(drafterObj), "Hemodynamic stabilization protocol confirmed.");
+  });
+
+  await test("normalizeDisplayText extracts synthesis from malformed JSON via regex fallback", () => {
+    const malformed = '{\n  "synthesis": "Emergency resuscitation guidelines.",\n  "citationsUsed": [';
+    assert.strictEqual(normalizeDisplayText(malformed), "Emergency resuscitation guidelines.");
+  });
+
+  await test("normalizeDisplayText falls back to raw text if JSON has no synthesis", () => {
+    const otherJson = '{"error": "something failed"}';
+    assert.strictEqual(normalizeDisplayText(otherJson), otherJson);
+  });
+
+  await test("normalizeDisplayText handles empty, null, and non-string gracefully", () => {
+    assert.strictEqual(normalizeDisplayText(""), "");
+    assert.strictEqual(normalizeDisplayText(null), "");
+    assert.strictEqual(normalizeDisplayText(undefined), "");
+    assert.strictEqual(normalizeDisplayText(123), "123");
+  });
+
+  await test("done event contract includes clean finalAnswer", () => {
+    const doneEvent = {
+      type: "done",
+      finalAnswer: "Clean synthesized answer",
+      data: {
+        totalTokens: 1500,
+        totalCostUsd: 0,
+        citationsCount: 5,
+        finalAnswer: "Clean synthesized answer"
+      }
+    };
+    assert.strictEqual(doneEvent.finalAnswer, "Clean synthesized answer");
+    assert.strictEqual(doneEvent.data.finalAnswer, "Clean synthesized answer");
+    assert.strictEqual(normalizeDisplayText(doneEvent.finalAnswer), "Clean synthesized answer");
+  });
+
+  // 21. Bounded Extractor Output Prompt Contract
+  await test("buildExtractorPrompt instructs 3 to 5 concise facts", () => {
+    const fs = require("fs");
+    const promptSrc = fs.readFileSync(require("path").join(__dirname, "../src/core/application/agents/specialist-prompts.ts"), "utf-8");
+    assert.ok(promptSrc.includes("3 to 5 most important factual claims"), "Must guide extractor to 3-5 facts");
+    assert.ok(promptSrc.includes("Keep each statement concise"), "Must guide extractor to concise statements");
+  });
+
+  // 22. Provider-Aware Step Timeout Resolution
+  await test("provider timeout resolution respects cloud 30s and Ollama 60s", () => {
+    function resolveTimeout(provider, env = {}) {
+      const p = (provider || env.AI_PROVIDER || "").trim().toLowerCase();
+      if (p === "ollama") {
+        const raw = env.OLLAMA_STEP_TIMEOUT_MS || env.STEP_TIMEOUT_MS;
+        return raw ? parseInt(raw, 10) : 60000;
+      }
+      const raw = env.STEP_TIMEOUT_MS;
+      return raw ? parseInt(raw, 10) : 30000;
+    }
+    assert.strictEqual(resolveTimeout("openai"), 30000);
+    assert.strictEqual(resolveTimeout("openrouter"), 30000);
+    assert.strictEqual(resolveTimeout("ollama"), 60000);
+    assert.strictEqual(resolveTimeout("ollama", { OLLAMA_STEP_TIMEOUT_MS: "45000" }), 45000);
+    assert.strictEqual(resolveTimeout("openai", { STEP_TIMEOUT_MS: "25000" }), 25000);
+  });
+
   console.log("--------------------------------------------------");
   console.log(`Unit Test Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("==================================================");

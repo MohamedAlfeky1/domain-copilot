@@ -32,6 +32,7 @@ require.extensions[".ts"] = function (module, filename) {
 const {
   resolveAIProvider,
   createAIProvider,
+  resolveStepTimeoutMs,
   ConfigurationError,
   SUPPORTED_AI_PROVIDERS,
 } = require("../src/infrastructure/ai/ai-provider.factory.ts");
@@ -327,6 +328,33 @@ async function runProviderFactoryTests() {
     // In executeDrafterPhase, orchestrator calls:
     // await this.db.recordUsage({ provider: this.aiProvider.providerName, ... })
     assert.strictEqual(customProvider.providerName, "custom-mock-ai");
+  });
+
+  // ---------------------------------------------------------------------------
+  // Scenario G: Provider-Aware Step Timeout Resolution (Ollama vs Cloud)
+  // ---------------------------------------------------------------------------
+  await test("G1. resolveStepTimeoutMs defaults to 60000ms for Ollama provider", () => {
+    delete process.env.OLLAMA_STEP_TIMEOUT_MS;
+    delete process.env.STEP_TIMEOUT_MS;
+    assert.strictEqual(resolveStepTimeoutMs("ollama"), 60000);
+  });
+
+  await test("G2. resolveStepTimeoutMs defaults to 30000ms for OpenAI and OpenRouter", () => {
+    delete process.env.STEP_TIMEOUT_MS;
+    assert.strictEqual(resolveStepTimeoutMs("openai"), 30000);
+    assert.strictEqual(resolveStepTimeoutMs("openrouter"), 30000);
+    assert.strictEqual(resolveStepTimeoutMs(""), 30000);
+  });
+
+  await test("G3. resolveStepTimeoutMs respects OLLAMA_STEP_TIMEOUT_MS and STEP_TIMEOUT_MS overrides", () => {
+    process.env.OLLAMA_STEP_TIMEOUT_MS = "75000";
+    assert.strictEqual(resolveStepTimeoutMs("ollama"), 75000);
+    delete process.env.OLLAMA_STEP_TIMEOUT_MS;
+
+    process.env.STEP_TIMEOUT_MS = "45000";
+    assert.strictEqual(resolveStepTimeoutMs("openai"), 45000);
+    assert.strictEqual(resolveStepTimeoutMs("ollama"), 45000); // Falls back to STEP_TIMEOUT_MS when OLLAMA_STEP_TIMEOUT_MS unset
+    delete process.env.STEP_TIMEOUT_MS;
   });
 
   // Restore env
