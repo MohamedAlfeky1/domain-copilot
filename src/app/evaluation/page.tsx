@@ -37,16 +37,7 @@ interface EvalTestCase {
 }
 
 export default function EvaluationPage() {
-  const [summary, setSummary] = useState<EvalSummary>({
-    totalTests: 26,
-    passed: 26,
-    failed: 0,
-    passRatePct: 100,
-    averageLatencyMs: 15,
-    totalCostUsd: 0.0724,
-    retrievalRecallPct: 100,
-    refusalPrecisionPct: 100,
-  });
+  const [summary, setSummary] = useState<EvalSummary | null>(null);
   const [testCases, setTestCases] = useState<EvalTestCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -91,13 +82,30 @@ export default function EvaluationPage() {
         if (data.recentResults && data.recentResults.length > 0) {
           setTestCases(data.recentResults);
         }
-        setLastEvaluatedAt(new Date().toISOString());
+        if (data.evaluatedAt) {
+          setLastEvaluatedAt(data.evaluatedAt);
+        }
       }
     } catch (err) {
-      console.error("Error triggering evaluation suite:", err);
+      console.error("Error synchronizing evaluation baseline:", err);
     } finally {
       setRunning(false);
     }
+  };
+
+  const formatCost = (val: number | null | undefined) => {
+    if (val == null || isNaN(val)) return "—";
+    return `$${Number(val).toFixed(5)}`;
+  };
+
+  const formatLatency = (val: number | null | undefined) => {
+    if (val == null || isNaN(val)) return "—";
+    return `${val}ms`;
+  };
+
+  const formatPct = (val: number | null | undefined) => {
+    if (val == null || isNaN(val)) return "—";
+    return `${val}%`;
   };
 
   return (
@@ -109,8 +117,11 @@ export default function EvaluationPage() {
             <Badge variant="purple" className="text-[11px] font-mono uppercase">
               BENCHMARK HARNESS
             </Badge>
+            <Badge variant="outline" className="text-[10px] font-mono text-muted-foreground">
+              EMPIRICAL BASELINE FIXTURE
+            </Badge>
             <span className="text-xs text-muted-foreground">
-              Empirical PostgreSQL &amp; pgvector Golden Benchmark ({summary.totalTests} Q/A Pairs)
+              Empirical PostgreSQL &amp; pgvector Golden Benchmark ({summary ? `${summary.totalTests} Q/A Pairs` : "33 Q/A Pairs"})
             </span>
           </div>
           <h2 className="text-xl font-bold text-foreground tracking-tight">Evaluation Benchmark &amp; Quality Harness</h2>
@@ -122,7 +133,7 @@ export default function EvaluationPage() {
         <div className="flex items-center gap-3">
           {lastEvaluatedAt && (
             <span className="text-[11px] text-muted-foreground font-mono hidden md:inline">
-              Last run: {new Date(lastEvaluatedAt).toLocaleTimeString()}
+              Baseline: {new Date(lastEvaluatedAt).toLocaleDateString()}
             </span>
           )}
           <Button
@@ -136,34 +147,70 @@ export default function EvaluationPage() {
             ) : (
               <AppIcons.run className="w-3.5 h-3.5" />
             )}
-            {running ? "Benchmarking Engine..." : "Run Golden Evaluation"}
+            {running ? "Syncing Baseline..." : "Sync Baseline Benchmark"}
           </Button>
         </div>
       </Card>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
         <Card className="p-4 font-mono shadow-xs bg-card border-border">
           <span className="text-[10px] text-muted-foreground uppercase font-semibold">Golden Pass Rate</span>
-          <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{summary.passRatePct}%</p>
+          {loading && !summary ? (
+            <div className="h-8 w-20 bg-muted animate-pulse rounded mt-1" />
+          ) : (
+            <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+              {formatPct(summary?.passRatePct)}
+            </p>
+          )}
           <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80 mt-0.5">Floor target: &gt;= 80%</p>
         </Card>
 
         <Card className="p-4 font-mono shadow-xs bg-card border-border">
+          <span className="text-[10px] text-muted-foreground uppercase font-semibold">Retrieval Recall</span>
+          {loading && !summary ? (
+            <div className="h-8 w-20 bg-muted animate-pulse rounded mt-1" />
+          ) : (
+            <p className="text-2xl font-bold text-primary mt-1">
+              {formatPct(summary?.retrievalRecallPct)}
+            </p>
+          )}
+          <p className="text-[10px] text-muted-foreground mt-0.5">Top-5 hybrid recall</p>
+        </Card>
+
+        <Card className="p-4 font-mono shadow-xs bg-card border-border">
           <span className="text-[10px] text-muted-foreground uppercase font-semibold">Refusal Precision</span>
-          <p className="text-2xl font-bold text-primary mt-1">{summary.refusalPrecisionPct || 100}%</p>
+          {loading && !summary ? (
+            <div className="h-8 w-20 bg-muted animate-pulse rounded mt-1" />
+          ) : (
+            <p className="text-2xl font-bold text-primary mt-1">
+              {formatPct(summary?.refusalPrecisionPct)}
+            </p>
+          )}
           <p className="text-[10px] text-muted-foreground mt-0.5">Zero ungrounded hallucinations</p>
         </Card>
 
         <Card className="p-4 font-mono shadow-xs bg-card border-border">
           <span className="text-[10px] text-muted-foreground uppercase font-semibold">Average Latency</span>
-          <p className="text-2xl font-bold text-foreground mt-1">{summary.averageLatencyMs}ms</p>
+          {loading && !summary ? (
+            <div className="h-8 w-20 bg-muted animate-pulse rounded mt-1" />
+          ) : (
+            <p className="text-2xl font-bold text-foreground mt-1">
+              {formatLatency(summary?.averageLatencyMs)}
+            </p>
+          )}
           <p className="text-[10px] text-muted-foreground mt-0.5">PGlite pgvector + FTS</p>
         </Card>
 
         <Card className="p-4 font-mono shadow-xs bg-card border-border">
           <span className="text-[10px] text-muted-foreground uppercase font-semibold">Total Token Cost</span>
-          <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">${summary.totalCostUsd}</p>
+          {loading && !summary ? (
+            <div className="h-8 w-24 bg-muted animate-pulse rounded mt-1" />
+          ) : (
+            <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">
+              {formatCost(summary?.totalCostUsd)}
+            </p>
+          )}
           <p className="text-[10px] text-muted-foreground mt-0.5">Recorded usage ledger rate</p>
         </Card>
       </div>
@@ -172,7 +219,7 @@ export default function EvaluationPage() {
       <Card className="shadow-sm overflow-hidden bg-card border-border">
         <div className="p-4 border-b border-border flex items-center justify-between bg-muted/20">
           <h3 className="text-xs font-bold text-foreground font-mono tracking-wider">
-            EMPIRICAL BENCHMARK CASES ({testCases.length > 0 ? testCases.length : summary.totalTests} TEST CASES)
+            EMPIRICAL BENCHMARK CASES ({testCases.length > 0 ? testCases.length : (summary?.totalTests ?? 33)} TEST CASES)
           </h3>
           <Button
             onClick={fetchEvaluationData}
@@ -232,7 +279,7 @@ export default function EvaluationPage() {
                           {tc.groundednessScore.toFixed(2)}
                         </span>
                       ) : (
-                        "0.92"
+                        "—"
                       )}
                     </TableCell>
                     <TableCell className="py-3 px-4 text-muted-foreground">{tc.latencyMs}ms</TableCell>
@@ -254,7 +301,9 @@ export default function EvaluationPage() {
               ) : (
                 <TableRow>
                   <TableCell colSpan={6} className="py-8 text-center text-muted-foreground font-sans">
-                    Click &quot;Run Golden Evaluation&quot; to benchmark all 26 test cases against the live hybrid retrieval engine.
+                    {loading
+                      ? "Loading empirical benchmark test cases..."
+                      : "Click \"Sync Baseline Benchmark\" to load and audit all 33 empirical test cases against the hybrid retrieval engine."}
                   </TableCell>
                 </TableRow>
               )}
