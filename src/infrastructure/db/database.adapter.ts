@@ -1167,6 +1167,16 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
     return null;
   }
 
+  async getRunsBySessionId(sessionId: string): Promise<Run[]> {
+    const list: Run[] = [];
+    for (const r of this.runs.values()) {
+      if (r.sessionId === sessionId) {
+        list.push({ ...r });
+      }
+    }
+    return list.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+  }
+
   async updateRunStatus(
     id: string,
     status: Run["status"],

@@ -62,6 +62,7 @@ export interface IDatabasePort {
   saveRun(run: Run): Promise<Run>;
   getRunById(id: string): Promise<Run | null>;
   getRunByCorrelationId(correlationId: string): Promise<Run | null>;
+  getRunsBySessionId(sessionId: string): Promise<Run[]>;
   updateRunStatus(id: string, status: Run["status"], refusalReason?: string, finalOutput?: string): Promise<void>;
   listRuns(limit?: number): Promise<Run[]>;
 

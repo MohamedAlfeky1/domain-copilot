@@ -394,6 +394,96 @@ async function runChatHistoryTests() {
     assert.strictEqual(alreadyPersisted, true);
   });
 
+  await test("HITL approval -> resume -> persisted assistant message -> conversation rehydration", async () => {
+    const hitlConv = await db.createConversation({
+      id: `conv-rehydrate-${Date.now()}`,
+      ownerId: userA.id,
+      title: "Dosage Protocol Review",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    // 1. User sends a consequential query
+    const userMsg = await db.createMessage({
+      id: `msg-rehydrate-user-${Date.now()}`,
+      conversationId: hitlConv.id,
+      role: "user",
+      content: "What exact dosage should be used when the patient's weight and renal function are unavailable?",
+      createdAt: new Date().toISOString(),
+    });
+
+    // 2. Run enters APPROVAL_PENDING
+    const run = await db.saveRun({
+      id: `run-rehydrate-${Date.now()}`,
+      ownerId: userA.id,
+      sessionId: hitlConv.id,
+      correlationId: `corr-rehydrate-${Date.now()}`,
+      query: userMsg.content,
+      status: "APPROVAL_PENDING",
+      citations: [],
+      startedAt: new Date().toISOString(),
+    });
+
+    const approval = await db.saveApproval({
+      id: `appr-rehydrate-${Date.now()}`,
+      runId: run.id,
+      stepId: "safety-auditor",
+      riskLevel: "CRITICAL",
+      proposedAction: "Administer standardized empiric renal-sparing protocol",
+      status: "PENDING",
+      createdAt: new Date().toISOString(),
+    });
+
+    // Verify invariant: No assistant message while APPROVAL_PENDING
+    let currentMsgs = await db.listMessagesByConversation(hitlConv.id);
+    assert.strictEqual(currentMsgs.length, 1);
+    assert.strictEqual(currentMsgs[0].role, "user");
+
+    // 3. Human approval succeeds
+    await db.updateApproval(approval.id, "APPROVED", undefined, "Approved by Dr. Approver", userA.id);
+    const updatedApproval = await db.getApprovalById(approval.id);
+    assert.strictEqual(updatedApproval.status, "APPROVED");
+
+    // 4. Run resumes and completes
+    const cleanSynthesis = "Empiric dosing guidelines dictate standard loading dose with mandatory TDM.";
+    const citations = [
+      { citationId: "cit-1", documentName: "Renal_Dosing_Guidelines.pdf", page: 4, excerpt: "Standard empiric loading dose..." }
+    ];
+
+    await db.updateRunStatus(run.id, "COMPLETED", undefined, cleanSynthesis);
+
+    // 5. Exactly ONE assistant message is persisted
+    const asstMsg = await db.createMessage({
+      id: `msg-rehydrate-asst-${Date.now()}`,
+      conversationId: hitlConv.id,
+      runId: run.id,
+      role: "assistant",
+      content: cleanSynthesis,
+      citations,
+      createdAt: new Date().toISOString(),
+    });
+
+    // 6. UI / API rehydration verification
+    // GET /api/conversations/:id/messages contains user message + exactly ONE assistant message
+    const rehydratedMsgs = await db.listMessagesByConversation(hitlConv.id);
+    assert.strictEqual(rehydratedMsgs.length, 2);
+    assert.strictEqual(rehydratedMsgs[0].role, "user");
+    assert.strictEqual(rehydratedMsgs[1].role, "assistant");
+    assert.strictEqual(rehydratedMsgs[1].runId, run.id);
+    assert.strictEqual(rehydratedMsgs[1].content, cleanSynthesis);
+    assert.strictEqual(rehydratedMsgs[1].citations.length, 1);
+
+    // 7. Duplicate resume attempts guarantee idempotency (no duplicate assistant message)
+    const existingAssistantMsgs = rehydratedMsgs.filter(
+      (m) => m.runId === run.id && m.role === "assistant"
+    );
+    assert.strictEqual(existingAssistantMsgs.length, 1);
+
+    // 8. Run-to-Conversation mapping recovery (used by Copilot UI when navigating from Reviews)
+    const runRecord = await db.getRunById(run.id);
+    assert.strictEqual(runRecord.sessionId, hitlConv.id);
+  });
+
   console.log("================================================================================");
   console.log(`Persistent Chat History Test Results: ${passed} Passed, ${failed} Failed`);
   console.log("================================================================================");

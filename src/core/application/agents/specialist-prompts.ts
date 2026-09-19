@@ -103,7 +103,7 @@ You MUST respond with valid JSON matching this exact schema:
   "verifiedFacts": ["<facts confirmed as accurate and safe>"],
   "riskFlags": [
     {
-      "riskType": "<type of risk identified>",
+      "riskType": "<one of: Dosage Violation, Contraindication, Toxicity, Off-Label Claim, Compliance Violation>",
       "severity": "<one of: LOW, MEDIUM, HIGH, CRITICAL>",
       "detail": "<explanation of the risk>"
     }
@@ -115,6 +115,8 @@ You MUST respond with valid JSON matching this exact schema:
 
 Rules:
 - Flag any claim that violates the domain risk policy.
+- For unsafe dosing, unverified dosage calculation without weight/renal parameters, or therapeutic ceiling breaches, set riskType to "Dosage Violation" with severity HIGH or CRITICAL.
+- For dangerous drug-drug interactions or contraindications, set riskType to "Contraindication" with severity HIGH or CRITICAL.
 - Set requiresHumanReview to true ONLY if a side-effecting action, unverified drug interaction, or off-label dosage claim is being PROPOSED (not merely discussed or described).
 - Do NOT set requiresHumanReview to true for data completeness concerns, scope violations, or purely informational queries that describe clinical facts without proposing an action.
 - Set domainComplianceApproved to false if policy violations are found.

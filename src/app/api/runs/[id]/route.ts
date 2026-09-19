@@ -32,6 +32,7 @@ export async function GET(
       usage,
       stepCount: steps.length,
       approval,
+      conversationId: run.sessionId || null,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: error.httpStatus || 500 });
