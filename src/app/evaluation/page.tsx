@@ -13,6 +13,15 @@ import {
   TableRow,
   TableCell,
 } from "@/components/ui/table";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 
 interface EvalSummary {
   totalTests: number;
@@ -36,6 +45,27 @@ interface EvalTestCase {
   refusalTriggered?: boolean;
 }
 
+const PAGE_SIZE = 15;
+
+const getPageNumbers = (
+  current: number,
+  total: number
+): (number | "ellipsis-start" | "ellipsis-end")[] => {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  if (current <= 4) {
+    return [1, 2, 3, 4, 5, "ellipsis-end", total];
+  }
+
+  if (current >= total - 3) {
+    return [1, "ellipsis-start", total - 4, total - 3, total - 2, total - 1, total];
+  }
+
+  return [1, "ellipsis-start", current - 1, current, current + 1, "ellipsis-end", total];
+};
+
 export default function EvaluationPage() {
   const [summary, setSummary] = useState<EvalSummary>({
     totalTests: 26,
@@ -48,9 +78,28 @@ export default function EvaluationPage() {
     refusalPrecisionPct: 100,
   });
   const [testCases, setTestCases] = useState<EvalTestCase[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [lastEvaluatedAt, setLastEvaluatedAt] = useState<string | null>(null);
+
+  const totalPages = Math.ceil(testCases.length / PAGE_SIZE);
+
+  // Reset to page 1 whenever test cases reload or change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [testCases.length]);
+
+  // Clamp to last valid page if active page becomes out of bounds
+  useEffect(() => {
+    if (totalPages > 0 && currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
+  const safeCurrentPage = totalPages > 0 ? Math.min(Math.max(1, currentPage), totalPages) : 1;
+  const startIndex = (safeCurrentPage - 1) * PAGE_SIZE;
+  const paginatedCases = testCases.slice(startIndex, startIndex + PAGE_SIZE);
 
   const fetchEvaluationData = async () => {
     try {
@@ -199,8 +248,8 @@ export default function EvaluationPage() {
               </TableRow>
             </TableHeader>
             <TableBody className="text-xs font-mono">
-              {testCases.length > 0 ? (
-                testCases.map((tc) => (
+              {paginatedCases.length > 0 ? (
+                paginatedCases.map((tc) => (
                   <TableRow key={tc.id} className="hover:bg-muted/30 transition-colors">
                     <TableCell className="py-3 px-4 font-bold text-primary">{tc.id}</TableCell>
                     <TableCell className="py-3 px-4">
@@ -261,6 +310,60 @@ export default function EvaluationPage() {
             </TableBody>
           </Table>
         </div>
+
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="p-4 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-3 bg-muted/10">
+            <p className="text-[11px] text-muted-foreground font-mono order-2 sm:order-1">
+              Showing {startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, testCases.length)} of {testCases.length} test cases (Page {safeCurrentPage} of {totalPages})
+            </p>
+            <Pagination className="order-1 sm:order-2 justify-center sm:justify-end w-auto mx-0">
+              <PaginationContent className="flex-wrap justify-center gap-1">
+                <PaginationItem>
+                  <PaginationPrevious
+                    onClick={() => {
+                      if (safeCurrentPage > 1) {
+                        setCurrentPage(safeCurrentPage - 1);
+                      }
+                    }}
+                    disabled={safeCurrentPage <= 1}
+                    className="h-8 text-xs font-mono"
+                  />
+                </PaginationItem>
+
+                {getPageNumbers(safeCurrentPage, totalPages).map((item) =>
+                  item === "ellipsis-start" || item === "ellipsis-end" ? (
+                    <PaginationItem key={item}>
+                      <PaginationEllipsis className="h-8 w-8" />
+                    </PaginationItem>
+                  ) : (
+                    <PaginationItem key={item}>
+                      <PaginationLink
+                        isActive={item === safeCurrentPage}
+                        onClick={() => setCurrentPage(item)}
+                        className="h-8 w-8 text-xs cursor-pointer font-mono"
+                      >
+                        {item}
+                      </PaginationLink>
+                    </PaginationItem>
+                  )
+                )}
+
+                <PaginationItem>
+                  <PaginationNext
+                    onClick={() => {
+                      if (safeCurrentPage < totalPages) {
+                        setCurrentPage(safeCurrentPage + 1);
+                      }
+                    }}
+                    disabled={safeCurrentPage >= totalPages}
+                    className="h-8 text-xs font-mono"
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          </div>
+        )}
       </Card>
     </div>
   );

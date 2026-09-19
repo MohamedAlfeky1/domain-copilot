@@ -10,7 +10,6 @@ import { Badge } from "@/components/ui/badge";
 
 const DEMO_ACCOUNTS = [
   { role: "ADMIN", label: "System Admin", email: "admin@domaincopilot.ai", pass: "admin123", badge: "Full Access" },
-  { role: "APPROVER", label: "Dr. Approver", email: "approver@domaincopilot.ai", pass: "approver123", badge: "HITL Reviews" },
   { role: "EXPERT", label: "Clinical Expert", email: "expert@domaincopilot.ai", pass: "expert123", badge: "Copilot & Runs" },
   { role: "VIEWER", label: "Read-Only Auditor", email: "viewer@domaincopilot.ai", pass: "viewer123", badge: "Read-Only" },
 ];

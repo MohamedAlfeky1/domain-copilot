@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { AppIcons } from "@/components/ui/icons";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,9 +10,55 @@ import { Input } from "@/components/ui/input";
 export default function SettingsPage() {
   const [domainId, setDomainId] = useState("D0_HEALTHCARE");
   const [twistId, setTwistId] = useState("T1_BILINGUAL_AR_EN");
-  const [model, setModel] = useState("google/gemma-4-31b-it:free");
-  const [embeddingModel, setEmbeddingModel] = useState("models/gemini-embedding-001");
+  const [loading, setLoading] = useState(true);
+  const [aiProvider, setAiProvider] = useState<string>("");
+  const [model, setModel] = useState<string>("");
+  const [embeddingModel, setEmbeddingModel] = useState<string>("");
+  const [embeddingProvider, setEmbeddingProvider] = useState<string>("");
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadRuntimeConfig() {
+      try {
+        const token = typeof window !== "undefined" ? localStorage.getItem("dc_token") : null;
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        const res = await fetch("/api/settings", { headers });
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) {
+            setAiProvider(data.aiProvider || "UNAVAILABLE");
+            setModel(data.completionModel || "Unavailable");
+            setEmbeddingModel(data.embeddingModel || "Unavailable");
+            setEmbeddingProvider(data.embeddingProvider || "GEMINI");
+          }
+        } else {
+          if (isMounted) {
+            setAiProvider("UNAVAILABLE");
+            setModel("Unavailable");
+            setEmbeddingModel("Unavailable");
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setAiProvider("UNAVAILABLE");
+          setModel("Unavailable");
+          setEmbeddingModel("Unavailable");
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadRuntimeConfig();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleSave = () => {
     setSaved(true);
@@ -90,25 +136,42 @@ export default function SettingsPage() {
           <span>AI &amp; LLM PROVIDER CONFIGURATION</span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-mono text-foreground font-semibold">AI Provider:</label>
+            <div className="h-9 flex items-center px-3 rounded-md border border-input bg-slate-50/50 font-mono text-xs">
+              {loading ? (
+                <span className="text-muted-foreground font-normal">Loading...</span>
+              ) : (
+                <Badge
+                  variant="outline"
+                  className="font-mono text-xs font-bold uppercase tracking-wider px-2 py-0.5 bg-white border-slate-300 text-slate-800"
+                >
+                  {aiProvider || "UNAVAILABLE"}
+                </Badge>
+              )}
+            </div>
+            <p className="text-[10px] text-muted-foreground">Active runtime AI provider engine</p>
+          </div>
+
           <div className="space-y-1.5">
             <label className="text-xs font-mono text-foreground font-semibold">LLM Completion Model:</label>
             <Input
               type="text"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="font-mono text-xs"
+              readOnly
+              value={loading ? "Loading..." : (model || "Unavailable")}
+              className="font-mono text-xs bg-slate-50/50 cursor-default text-slate-800"
             />
-            <p className="text-[10px] text-muted-foreground">Configured active OpenRouter / LLM model</p>
+            <p className="text-[10px] text-muted-foreground">Active completion provider and model used by the runtime.</p>
           </div>
 
           <div className="space-y-1.5">
             <label className="text-xs font-mono text-foreground font-semibold">Embedding Model:</label>
             <Input
               type="text"
-              value={embeddingModel}
-              onChange={(e) => setEmbeddingModel(e.target.value)}
-              className="font-mono text-xs"
+              readOnly
+              value={loading ? "Loading..." : (embeddingModel || "Unavailable")}
+              className="font-mono text-xs bg-slate-50/50 cursor-default text-slate-800"
             />
             <p className="text-[10px] text-muted-foreground">1536-dimensional normalized vector embeddings</p>
           </div>
