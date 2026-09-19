@@ -15,6 +15,7 @@
  * HITL-004: Approved action executed via ToolRegistry
  */
 
+import crypto from "crypto";
 import { IDatabasePort } from "../ports/database.port";
 import { IAIProviderPort, CompletionMessage, CompletionResult } from "../ports/ai-provider.port";
 import { HybridRetrievalService, RetrievalResult } from "../retrieval/retrieval.service";
@@ -471,6 +472,37 @@ export class MultiAgentOrchestrator {
       completedRun.citations = retrievalCitations;
     }
     await this.db.updateRunStatus(runId, "COMPLETED", undefined, finalAnswer);
+
+    // Persist Assistant Message if part of a conversation
+    try {
+      const run = await this.db.getRunById(runId);
+      const conversationId = run?.sessionId;
+      if (conversationId) {
+        const conversation = await this.db.getConversationById(conversationId);
+        if (conversation) {
+          const existingMessages = await this.db.listMessagesByConversation(conversationId);
+          const alreadyPersisted = existingMessages.some(
+            (m) => m.runId === runId && m.role === "assistant"
+          );
+          if (!alreadyPersisted) {
+            const now = new Date().toISOString();
+            await this.db.createMessage({
+              id: `msg-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`,
+              conversationId,
+              runId,
+              role: "assistant",
+              content: finalAnswer,
+              citations: retrievalCitations,
+              createdAt: now,
+            });
+            await this.db.updateConversation(conversationId, { updatedAt: now });
+          }
+        }
+      }
+    } catch (persistErr) {
+      console.warn("Notice: Failed to persist assistant message to conversation:", persistErr);
+    }
+
     emitEvent?.({
       type: "done",
       finalAnswer,
