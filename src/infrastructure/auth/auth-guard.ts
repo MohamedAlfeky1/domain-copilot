@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { container } from "../../core/application/container";
-import { ApprovalRequest, Document, Run, User, UserRole } from "../../core/domain/types";
+import { ApprovalRequest, Document, Run, User, UserRole, Conversation } from "../../core/domain/types";
 import { ForbiddenError, UnauthorizedError } from "../../core/domain/errors";
 import {
   SESSION_TTL_SECONDS,
@@ -90,6 +90,17 @@ export function requireRunAccess(
     throw new ForbiddenError("You do not have access to this run.");
   }
 }
+
+export function canAccessConversation(user: User, conversation: Conversation): boolean {
+  return user.role === "ADMIN" || conversation.ownerId === user.id;
+}
+
+export function requireConversationAccess(user: User, conversation: Conversation): void {
+  if (!canAccessConversation(user, conversation)) {
+    throw new ForbiddenError("You do not have access to this conversation.");
+  }
+}
+
 
 export function canManageDocument(user: User, document: Document): boolean {
   return user.role === "ADMIN" || user.role === "APPROVER" || document.ownerId === user.id;

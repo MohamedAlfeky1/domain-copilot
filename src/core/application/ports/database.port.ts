@@ -17,6 +17,8 @@ import {
   User,
   EvaluationCase,
   EvaluationResult,
+  Conversation,
+  Message,
 } from "../../domain/types";
 
 export interface DatabaseReadinessResult {
@@ -88,6 +90,18 @@ export interface IDatabasePort {
   saveEvaluationResult(result: EvaluationResult): Promise<void>;
   listEvaluationResults(): Promise<EvaluationResult[]>;
 
+  // Conversations & Messages
+  createConversation(conversation: Conversation): Promise<Conversation>;
+  getConversationById(id: string): Promise<Conversation | null>;
+  listConversationsByOwner(ownerId: string): Promise<Conversation[]>;
+  updateConversation(id: string, updates: Partial<Pick<Conversation, "title" | "updatedAt">>): Promise<void>;
+  deleteConversation(id: string): Promise<void>;
+
+  createMessage(message: Message): Promise<Message>;
+  listMessagesByConversation(conversationId: string): Promise<Message[]>;
+  getMessageById(id: string): Promise<Message | null>;
+
   // Readiness & Health Check (OBS-006)
   checkReadiness(): Promise<DatabaseReadinessResult>;
 }
+

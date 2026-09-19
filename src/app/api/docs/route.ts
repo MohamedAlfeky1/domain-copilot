@@ -57,6 +57,34 @@ const openApiSpecification = {
         },
         required: ["id", "email", "role", "status"],
       },
+      Conversation: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          ownerId: { type: "string" },
+          title: { type: "string" },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+        required: ["id", "ownerId", "title", "createdAt", "updatedAt"],
+      },
+      Message: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          conversationId: { type: "string" },
+          runId: { type: "string", nullable: true },
+          role: { type: "string", enum: ["user", "assistant"] },
+          content: { type: "string" },
+          citations: {
+            type: "array",
+            items: { $ref: "#/components/schemas/Citation" },
+            nullable: true,
+          },
+          createdAt: { type: "string", format: "date-time" },
+        },
+        required: ["id", "conversationId", "role", "content", "createdAt"],
+      },
       Document: {
         type: "object",
         properties: {
@@ -282,6 +310,155 @@ const openApiSpecification = {
         responses: {
           200: { description: "Document re-ingested" },
           403: { description: "Forbidden: APPROVER or ADMIN role required" },
+        },
+      },
+    },
+    "/api/conversations": {
+      get: {
+        summary: "List persistent conversations for current user",
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+        responses: {
+          200: {
+            description: "List of user conversations sorted by updatedAt DESC",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    conversations: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Conversation" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        summary: "Create a new conversation",
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  title: { type: "string", default: "New Chat" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: "Conversation created",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    conversation: { $ref: "#/components/schemas/Conversation" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/api/conversations/{id}": {
+      get: {
+        summary: "Get conversation details with ownership validation",
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          200: { description: "Conversation found" },
+          403: { description: "Forbidden: Access denied to other user's conversation" },
+          404: { description: "Conversation not found" },
+        },
+      },
+      patch: {
+        summary: "Update conversation title",
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { title: { type: "string" } },
+                required: ["title"],
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: "Conversation updated" },
+          403: { description: "Forbidden" },
+          404: { description: "Not found" },
+        },
+      },
+      delete: {
+        summary: "Delete conversation and all cascading messages",
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          200: { description: "Conversation deleted" },
+          403: { description: "Forbidden" },
+          404: { description: "Not found" },
+        },
+      },
+    },
+    "/api/conversations/{id}/messages": {
+      get: {
+        summary: "List chronological messages for conversation",
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          200: {
+            description: "Messages returned in chronological order",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    messages: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Message" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        summary: "Post user message, trigger linked run, and auto-derive chat title",
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  content: { type: "string" },
+                  filters: { type: "object" },
+                },
+                required: ["content"],
+              },
+            },
+          },
+        },
+        responses: {
+          201: { description: "Message created and Run started" },
+          400: { description: "Empty query or invalid filter" },
+          403: { description: "Forbidden" },
         },
       },
     },

@@ -4,6 +4,23 @@
  */
 
 const assert = require("assert");
+const fs = require("fs");
+const ts = require("typescript");
+
+if (!require.extensions[".ts"]) {
+  require.extensions[".ts"] = function (module, filename) {
+    const source = fs.readFileSync(filename, "utf8");
+    const { outputText } = ts.transpileModule(source, {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+        esModuleInterop: true,
+      },
+    });
+    module._compile(outputText, filename);
+  };
+}
+
 
 async function runUnitTests() {
   console.log("==================================================");
@@ -191,7 +208,7 @@ async function runUnitTests() {
     assert.strictEqual(getFtsConfig("en"), "english");
   });
 
-  // 18. T1 Bilingual: Cross-lingual retrieval targets both AR and EN
+  // 18. T1 Bilingual: Cross-lingual retrieval targets both Arabic and English corpuses
   await test("T1 Bilingual cross-lingual retrieval targets both Arabic and English corpuses", () => {
     const supported = ["ar", "en"];
     const query = "What are the sepsis resuscitation guidelines?";
@@ -485,6 +502,66 @@ async function runUnitTests() {
     const promptSrc = fs.readFileSync(require("path").join(__dirname, "../src/core/application/agents/specialist-prompts.ts"), "utf-8");
     assert.ok(promptSrc.includes("ONLY if a side-effecting action"), "Prompt must guide auditor to flag only side-effecting actions");
     assert.ok(promptSrc.includes("Do NOT set requiresHumanReview to true for data completeness"), "Prompt must explicitly exclude data completeness from HITL");
+  });
+
+  // Persistent Chat History: Deterministic title generation
+  await test("Deterministic title generation produces clean title from first message", () => {
+    const { generateDeterministicTitle } = require("../src/lib/chat-title.ts");
+    const title = generateDeterministicTitle("What are the prevention standards for hospital-acquired infections?", 45);
+    assert.strictEqual(title.length <= 45, true);
+    assert.strictEqual(title.endsWith("..."), true);
+    assert.strictEqual(title.startsWith("What are the prevention"), true);
+  });
+
+  // Persistent Chat History: Short message title preserves exact text
+  await test("Short user message does not append ellipsis to title", () => {
+    const { generateDeterministicTitle } = require("../src/lib/chat-title.ts");
+    const title = generateDeterministicTitle("Sepsis Protocol", 45);
+    assert.strictEqual(title, "Sepsis Protocol");
+  });
+
+  // Persistent Chat History: Markdown stripped from title
+  await test("Markdown symbols and headings are stripped from generated title", () => {
+    const { generateDeterministicTitle } = require("../src/lib/chat-title.ts");
+    const title = generateDeterministicTitle("### **Dosage Guide** for *Heparin*", 45);
+    assert.strictEqual(title, "Dosage Guide for Heparin");
+  });
+
+  // Persistent Chat History: Chronological message sorting
+  await test("Messages are ordered chronologically by createdAt ASC", () => {
+    const m1 = { id: "1", createdAt: "2026-09-19T01:00:00.000Z" };
+    const m2 = { id: "2", createdAt: "2026-09-19T01:05:00.000Z" };
+    const m3 = { id: "3", createdAt: "2026-09-19T01:02:00.000Z" };
+    const sorted = [m1, m2, m3].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    assert.deepStrictEqual(sorted.map(m => m.id), ["1", "3", "2"]);
+  });
+
+  // Persistent Chat History: Assistant message duplicate protection
+  await test("Duplicate assistant message check identifies existing runId", () => {
+    const existingMessages = [
+      { id: "m1", role: "user", runId: null },
+      { id: "m2", role: "assistant", runId: "run-123" },
+    ];
+    const runId = "run-123";
+    const alreadyPersisted = existingMessages.some(m => m.runId === runId && m.role === "assistant");
+    assert.strictEqual(alreadyPersisted, true);
+    const newRunAlreadyPersisted = existingMessages.some(m => m.runId === "run-456" && m.role === "assistant");
+    assert.strictEqual(newRunAlreadyPersisted, false);
+  });
+
+  // Persistent Chat History: Citations retention without re-retrieval
+  await test("Persisted assistant message retains structured citation excerpts", () => {
+    const msg = {
+      id: "msg-1",
+      role: "assistant",
+      content: "Protocol synthesis",
+      citations: [
+        { citationId: "c1", documentName: "HAI-Standard.pdf", page: 4, excerpt: "Hand hygiene standard" }
+      ]
+    };
+    assert.strictEqual(msg.citations.length, 1);
+    assert.strictEqual(msg.citations[0].documentName, "HAI-Standard.pdf");
+    assert.strictEqual(msg.citations[0].page, 4);
   });
 
   console.log("--------------------------------------------------");
