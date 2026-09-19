@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { AppIcons } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -68,23 +69,73 @@ function normalizeDisplayText(raw: unknown): string {
   return raw;
 }
 
+interface Conversation {
+  id: string;
+  ownerId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface Message {
+  id: string;
+  conversationId: string;
+  runId?: string | null;
+  role: "user" | "assistant";
+  content: string;
+  citations?: Citation[] | null;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+function formatRelativeTime(dateString: string): string {
+  try {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHours = Math.floor(diffMin / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffSec < 60) return "Just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
 export default function CopilotPage() {
+  // Conversations State
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loadingConversations, setLoadingConversations] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  // Input & Streaming State
   const [query, setQuery] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [streamedText, setStreamedText] = useState("");
-  const [citations, setCitations] = useState<Citation[]>([]);
+  const [streamCitations, setStreamCitations] = useState<Citation[]>([]);
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
   const [isRefused, setIsRefused] = useState(false);
   const [refusalMessage, setRefusalMessage] = useState("");
   const [accessDeniedMessage, setAccessDeniedMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
-  // HITL approval state
+  // HITL Approval State
   const [pendingApproval, setPendingApproval] = useState<ApprovalInfo | null>(null);
   const [isAwaitingApproval, setIsAwaitingApproval] = useState(false);
 
-  // Mandatory Twist state (TW-005)
+  // Mandatory Twist State (TW-005)
   const [twistEvaluation, setTwistEvaluation] = useState<{
     isPermitted: boolean;
     computedRiskIndex: number;
@@ -93,7 +144,7 @@ export default function CopilotPage() {
     violations: string[];
   } | null>(null);
 
-  // Workflow progress steps
+  // Workflow Progress Rail
   const [steps, setSteps] = useState<StepProgress[]>([
     { agent: "Retrieval Engine (Cross-Lingual AR+EN)", status: "pending" },
     { agent: "Clinical Evidence Extractor", status: "pending" },
@@ -221,8 +272,8 @@ export default function CopilotPage() {
               } else if (eventType === "citation") {
                 const item = data.data || data;
                 if (item && item.chunkId) {
-                  setCitations((prev) => {
-                    const exists = prev.some((c) => c.chunkId === item.chunkId);
+                  setStreamCitations((prev: Citation[]) => {
+                    const exists = prev.some((c: Citation) => c.chunkId === item.chunkId);
                     return exists ? prev : [...prev, item];
                   });
                 }
@@ -236,9 +287,9 @@ export default function CopilotPage() {
                   setStreamedText((prev) => normalizeDisplayText(prev));
                 }
                 if (Array.isArray(data.citations) && data.citations.length > 0) {
-                  setCitations(data.citations);
+                  setStreamCitations(data.citations);
                 } else if (Array.isArray(data.data?.citations) && data.data.citations.length > 0) {
-                  setCitations(data.data.citations);
+                  setStreamCitations(data.data.citations);
                 }
                 try {
                   localStorage.removeItem("copilot_active_run_id");
@@ -337,7 +388,7 @@ export default function CopilotPage() {
         if (run.query) setQuery(run.query);
 
         if (run.citations && Array.isArray(run.citations)) {
-          setCitations(run.citations);
+          setStreamCitations(run.citations);
         }
 
         const answerText = run.finalOutput || run.answer;
@@ -431,13 +482,214 @@ export default function CopilotPage() {
     };
   }, [resumeWorkflow]);
 
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, streamedText, scrollToBottom]);
+
+  // Load Messages for a Conversation
+  const loadMessages = useCallback(async (conversationId: string) => {
+    setLoadingMessages(true);
+    setChatError(null);
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/messages`);
+      if (res.status === 401) {
+        window.location.href = `/login?returnUrl=/copilot?conversationId=${conversationId}`;
+        return;
+      }
+      if (res.status === 403) {
+        setChatError("Access denied: You do not have permission to access this chat.");
+        setMessages([]);
+        return;
+      }
+      if (res.status === 404) {
+        setChatError("This chat was not found.");
+        setMessages([]);
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(`Failed to load messages (${res.status})`);
+      }
+      const data = await res.json();
+      setMessages(data.messages || []);
+    } catch (err: any) {
+      setChatError(err.message || "Failed to load chat messages.");
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, []);
+
+  // Select Active Conversation
+  const selectConversation = useCallback((conv: Conversation) => {
+    setActiveConversation(conv);
+    // Reset transient stream states
+    setStreamedText("");
+    setStreamCitations([]);
+    setIsRefused(false);
+    setRefusalMessage("");
+    setPendingApproval(null);
+    setIsAwaitingApproval(false);
+    setTwistEvaluation(null);
+    setSelectedCitation(null);
+
+    // Update URL query param without reload
+    const url = new URL(window.location.href);
+    url.searchParams.set("conversationId", conv.id);
+    window.history.pushState({}, "", url.toString());
+
+    loadMessages(conv.id);
+  }, [loadMessages]);
+
+  // Create New Chat
+  const handleNewChat = useCallback(async () => {
+    setChatError(null);
+    try {
+      const res = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "New Chat" }),
+      });
+      if (res.status === 401) {
+        window.location.href = "/login?returnUrl=/copilot";
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(`Failed to create new chat (${res.status})`);
+      }
+      const data = await res.json();
+      const newConv: Conversation = data.conversation;
+
+      setConversations((prev) => [newConv, ...prev]);
+      setActiveConversation(newConv);
+      setMessages([]);
+      setStreamedText("");
+      setStreamCitations([]);
+      setIsRefused(false);
+      setPendingApproval(null);
+      setIsAwaitingApproval(false);
+      setSelectedCitation(null);
+
+      const url = new URL(window.location.href);
+      url.searchParams.set("conversationId", newConv.id);
+      window.history.pushState({}, "", url.toString());
+    } catch (err: any) {
+      alert(`Error creating chat: ${err.message}`);
+    }
+  }, []);
+
+  // Delete Conversation
+  const handleDeleteConversation = useCallback(async (e: React.MouseEvent, convId: string) => {
+    e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this chat history?")) return;
+
+    try {
+      const res = await fetch(`/api/conversations/${convId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete chat");
+
+      setConversations((prev) => prev.filter((c) => c.id !== convId));
+
+      if (activeConversation?.id === convId) {
+        const remaining = conversations.filter((c) => c.id !== convId);
+        if (remaining.length > 0) {
+          selectConversation(remaining[0]);
+        } else {
+          setActiveConversation(null);
+          setMessages([]);
+          const url = new URL(window.location.href);
+          url.searchParams.delete("conversationId");
+          window.history.pushState({}, "", url.toString());
+        }
+      }
+    } catch (err: any) {
+      alert(`Delete failed: ${err.message}`);
+    }
+  }, [activeConversation, conversations, selectConversation]);
+
+  // Initial Boot & URL Rehydration
+  useEffect(() => {
+    async function init() {
+      setLoadingConversations(true);
+      try {
+        const res = await fetch("/api/conversations");
+        if (res.status === 401) {
+          window.location.href = "/login?returnUrl=/copilot";
+          return;
+        }
+        if (!res.ok) throw new Error("Failed to load conversations");
+
+        const data = await res.json();
+        const convList: Conversation[] = data.conversations || [];
+        setConversations(convList);
+
+        const params = new URLSearchParams(window.location.search);
+        const urlConvId = params.get("conversationId");
+
+        if (urlConvId) {
+          const match = convList.find((c) => c.id === urlConvId);
+          if (match) {
+            selectConversation(match);
+          } else {
+            // Try fetching specific conversation directly (in case it's newly created or not in owner list)
+            const singleRes = await fetch(`/api/conversations/${urlConvId}`);
+            if (singleRes.ok) {
+              const singleData = await singleRes.json();
+              setActiveConversation(singleData.conversation);
+              loadMessages(urlConvId);
+            } else if (convList.length > 0) {
+              selectConversation(convList[0]);
+            }
+          }
+        } else if (convList.length > 0) {
+          selectConversation(convList[0]);
+        }
+      } catch (err: any) {
+        setChatError(err.message || "Failed to load chat history.");
+      } finally {
+        setLoadingConversations(false);
+      }
+    }
+
+    init();
+  }, [loadMessages, selectConversation]);
+
+  // Submit Query in Active Conversation
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!query.trim() || streaming) return;
 
+    let targetConv = activeConversation;
+
+    // If no active conversation, create one automatically
+    if (!targetConv) {
+      try {
+        const res = await fetch("/api/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: "New Chat" }),
+        });
+        if (!res.ok) throw new Error("Failed to create conversation");
+        const data = await res.json();
+        targetConv = data.conversation;
+        setConversations((prev) => [targetConv!, ...prev]);
+        setActiveConversation(targetConv);
+      } catch (err: any) {
+        alert(`Error initiating chat: ${err.message}`);
+        return;
+      }
+    }
+
+    if (!targetConv) return;
+
+    const currentQuery = query.trim();
+    setQuery("");
     setStreaming(true);
     setStreamedText("");
-    setCitations([]);
+    setStreamCitations([]);
     setIsRefused(false);
     setRefusalMessage("");
     setAccessDeniedMessage(null);
@@ -456,25 +708,40 @@ export default function CopilotPage() {
     ]);
 
     try {
-      const initRes = await fetch("/api/queries", {
+      const initRes = await fetch(`/api/conversations/${targetConv.id}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ content: currentQuery }),
       });
 
       if (!initRes.ok) {
         const errData = await initRes.json().catch(() => ({}));
-        throw new Error(errData.error || `Failed to initiate query (${initRes.status})`);
+        throw new Error(errData.error || `Failed to send message (${initRes.status})`);
       }
 
-      const { runId } = await initRes.json();
+      const { runId, message: userMsg } = await initRes.json();
       setCurrentRunId(runId);
       try {
         localStorage.setItem("copilot_active_run_id", runId);
         window.history.replaceState(null, "", `/copilot?runId=${encodeURIComponent(runId)}`);
       } catch {}
 
-      // Open SSE stream
+      // Optimistically add user message to messages list
+      setMessages((prev) => [...prev, userMsg]);
+
+      // Update active conversation title if it was "New Chat"
+      if (targetConv.title === "New Chat") {
+        const titleRes = await fetch(`/api/conversations/${targetConv.id}`);
+        if (titleRes.ok) {
+          const updatedConvData = await titleRes.json();
+          setActiveConversation(updatedConvData.conversation);
+          setConversations((prev) =>
+            prev.map((c) => (c.id === targetConv!.id ? updatedConvData.conversation : c))
+          );
+        }
+      }
+
+      // Open SSE Stream to active run
       const sse = new EventSource(`/api/runs/${runId}/stream`);
       eventSourceRef.current = sse;
 
@@ -509,7 +776,7 @@ export default function CopilotPage() {
 
       sse.addEventListener("citation", (evt: any) => {
         const data = JSON.parse(evt.data);
-        setCitations((prev) => [...prev, data.data]);
+        setStreamCitations((prev) => [...prev, data.data]);
       });
 
       sse.addEventListener("refusal", (evt: any) => {
@@ -519,9 +786,7 @@ export default function CopilotPage() {
         setStreaming(false);
         setSteps((prev) =>
           prev.map((s, idx) =>
-            idx === 0
-              ? { ...s, status: "completed" }
-              : { ...s, status: "pending" }
+            idx === 0 ? { ...s, status: "completed" } : { ...s, status: "pending" }
           )
         );
         try {
@@ -530,7 +795,7 @@ export default function CopilotPage() {
         sse.close();
       });
 
-      // TW-005: Handle twist_evaluation event — live risk guard state
+      // TW-005: Handle twist_evaluation event
       sse.addEventListener("twist_evaluation", (evt: any) => {
         const data = JSON.parse(evt.data);
         if (data.data) {
@@ -538,7 +803,7 @@ export default function CopilotPage() {
         }
       });
 
-      // HITL-006: Handle approval_required event — workflow paused
+      // HITL-006: Handle approval_required event
       sse.addEventListener("approval_required", (evt: any) => {
         const data = JSON.parse(evt.data);
         const approvalData = data.data || data;
@@ -552,7 +817,6 @@ export default function CopilotPage() {
         setIsAwaitingApproval(true);
         setStreaming(false);
 
-        // Update progress rail to show approval gate
         setSteps((prev) => [
           ...prev.map((s) =>
             s.status === "running" ? { ...s, status: "completed" as const } : s
@@ -563,7 +827,8 @@ export default function CopilotPage() {
         sse.close();
       });
 
-      sse.addEventListener("done", (evt: any) => {
+      // Run completed successfully: reload persisted messages
+      sse.addEventListener("done", async (evt: any) => {
         setStreaming(false);
         setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" })));
         if (evt?.data) {
@@ -585,6 +850,13 @@ export default function CopilotPage() {
           localStorage.removeItem("copilot_active_run_id");
         } catch {}
         sse.close();
+
+        // Refresh messages from server to load the cleanly persisted assistant message
+        if (targetConv) {
+          await loadMessages(targetConv.id);
+          setStreamedText("");
+          setStreamCitations([]);
+        }
       });
 
       sse.addEventListener("error", (evt: any) => {
@@ -640,7 +912,7 @@ export default function CopilotPage() {
     setCurrentRunId(null);
     setQuery("");
     setStreamedText("");
-    setCitations([]);
+    setStreamCitations([]);
     setSelectedCitation(null);
     setIsRefused(false);
     setRefusalMessage("");
@@ -661,31 +933,110 @@ export default function CopilotPage() {
     } catch {}
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(normalizeDisplayText(streamedText));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = (text: string, id?: string) => {
+    navigator.clipboard.writeText(normalizeDisplayText(text));
+    if (id) {
+      setCopiedMessageId(id);
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    } else {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   return (
-    <div className="h-full flex gap-5 overflow-hidden">
-      {/* Main Copilot Workspace */}
-      <div className="flex-1 flex flex-col h-full bg-card border border-border rounded-xl overflow-hidden shadow-xs">
-        {/* Workspace Header */}
-        <div className="p-4 border-b border-border bg-card flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-sky-100 text-sky-700 border border-sky-200 flex items-center justify-center">
-              <AppIcons.copilot className="w-4 h-4" />
+    <div className="h-full flex gap-4 overflow-hidden">
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* 1. Conversations Sidebar (Chats History)                        */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      <div className="w-64 bg-card border border-border rounded-xl flex flex-col shrink-0 shadow-xs overflow-hidden">
+        {/* Sidebar Header */}
+        <div className="p-3 border-b border-border bg-card flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AppIcons.copilot className="w-4 h-4 text-sky-600" />
+            <span className="text-xs font-bold tracking-tight text-foreground uppercase">
+              Recent Chats
+            </span>
+          </div>
+          <Button
+            size="sm"
+            onClick={handleNewChat}
+            className="h-7 px-2.5 text-xs gap-1 shadow-xs bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+            title="Start a new chat"
+          >
+            <AppIcons.plus className="w-3.5 h-3.5" />
+            <span>New Chat</span>
+          </Button>
+        </div>
+
+        {/* Conversation List */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {loadingConversations ? (
+            <div className="p-4 text-center text-xs text-muted-foreground animate-pulse">
+              Loading chats...
             </div>
-            <div>
-              <h2 className="text-sm font-bold text-foreground tracking-tight">Copilot Grounded Workspace</h2>
-              <p className="text-[10px] text-muted-foreground font-mono">
-                Assigned Domain Multi-Agent Pipeline · Real-Time Stream
+          ) : conversations.length === 0 ? (
+            <div className="p-6 text-center text-xs text-muted-foreground flex flex-col items-center gap-2">
+              <AppIcons.pending className="w-5 h-5 text-slate-400" />
+              <span>No conversations yet. Click "New Chat" to begin!</span>
+            </div>
+          ) : (
+            conversations.map((conv) => {
+              const isActive = activeConversation?.id === conv.id;
+              return (
+                <div
+                  key={conv.id}
+                  onClick={() => selectConversation(conv)}
+                  className={`group relative flex items-center justify-between p-2.5 rounded-lg cursor-pointer transition-all text-xs ${
+                    isActive
+                      ? "bg-sky-50 border border-sky-200 text-sky-950 font-semibold shadow-2xs"
+                      : "hover:bg-slate-100/80 border border-transparent text-slate-700"
+                  }`}
+                >
+                  <div className="flex flex-col min-w-0 pr-2">
+                    <span className="truncate text-xs leading-tight">
+                      {conv.title || "Untitled Chat"}
+                    </span>
+                    <span className="text-[10px] font-mono text-muted-foreground font-normal mt-0.5">
+                      {formatRelativeTime(conv.updatedAt)}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={(e) => handleDeleteConversation(e, conv.id)}
+                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-600 transition-opacity rounded hover:bg-white"
+                    title="Delete Chat"
+                  >
+                    <AppIcons.delete className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* 2. Main Chat Thread & Composer                                 */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      <div className="flex-1 flex flex-col h-full bg-card border border-border rounded-xl overflow-hidden shadow-xs">
+        {/* Workspace Top Header */}
+        <div className="p-3.5 px-5 border-b border-border bg-card flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-sky-100 text-sky-700 border border-sky-200 flex items-center justify-center shrink-0">
+              <AppIcons.copilot className="w-3.5 h-3.5" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-xs font-bold text-foreground truncate tracking-tight">
+                {activeConversation?.title || "Copilot Grounded Workspace"}
+              </h2>
+              <p className="text-[10px] text-muted-foreground font-mono truncate">
+                Multi-Agent RAG Pipeline · Persistent Chat History
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-2 text-xs shrink-0">
             {twistEvaluation && (
               <Badge
                 variant={twistEvaluation.isPermitted ? "success" : "destructive"}
@@ -701,41 +1052,12 @@ export default function CopilotPage() {
                 <AppIcons.warning className="w-3.5 h-3.5" />
                 REFUSED: LOW EVIDENCE
               </Badge>
-            ) : streamedText.length > 0 ? (
-              <Badge variant="success" className="gap-1.5 font-mono text-[11px]">
-                <AppIcons.success className="w-3.5 h-3.5" />
-                GROUNDED SYNTHESIS
-              </Badge>
             ) : null}
-
-            {currentRunId && !streaming && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleNewQuery}
-                className="h-7 px-2.5 text-xs gap-1 text-slate-700"
-              >
-                <AppIcons.plus className="w-3 h-3" />
-                <span>New Query</span>
-              </Button>
-            )}
-
-            {streamedText && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleCopy}
-                className="h-7 px-2.5 text-xs gap-1 text-slate-700"
-              >
-                {copied ? <AppIcons.check className="w-3 h-3 text-emerald-600" /> : <AppIcons.copy className="w-3 h-3" />}
-                <span>{copied ? "Copied" : "Copy"}</span>
-              </Button>
-            )}
           </div>
         </div>
 
-        {/* Answer Content Panel */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 font-sans text-sm leading-relaxed bg-slate-50/30 flex flex-col">
+        {/* Messages Scroll Area */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4 font-sans text-sm bg-slate-50/40 flex flex-col">
           {accessDeniedMessage && (
             <Card className="border-rose-200 bg-rose-50/50 p-4 shadow-xs space-y-2">
               <div className="flex items-center gap-2 font-semibold text-rose-800 text-xs">
@@ -748,67 +1070,177 @@ export default function CopilotPage() {
                   size="sm"
                   variant="outline"
                   className="text-xs border-rose-300 text-rose-800 hover:bg-rose-100/50 shadow-2xs"
-                  onClick={handleNewQuery}
+                  onClick={handleNewChat}
                 >
-                  Start New Query
+                  Start New Chat
                 </Button>
               </div>
             </Card>
           )}
 
-          {streamedText.length === 0 && !isRefused && !isAwaitingApproval && !accessDeniedMessage && (
+          {chatError && (
+            <Card className="p-4 border-rose-200 bg-rose-50/60 text-rose-800 text-xs shadow-2xs">
+              <div className="flex items-center gap-2 font-semibold">
+                <AppIcons.error className="w-4 h-4 text-rose-600" />
+                <span>{chatError}</span>
+              </div>
+            </Card>
+          )}
+
+          {loadingMessages ? (
+            <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground animate-pulse">
+              Loading chat messages...
+            </div>
+          ) : messages.length === 0 && streamedText.length === 0 && !isRefused && !isAwaitingApproval && !accessDeniedMessage ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center py-12 px-4 select-none">
-              <AppIcons.copilot
-                className="w-7 h-7 text-sky-500 mb-3.5 shrink-0"
-                aria-hidden="true"
-              />
-              <h3 className="text-base font-semibold text-slate-800 tracking-tight">
-                Ask a domain-grounded clinical query
+              <div className="w-12 h-12 rounded-2xl bg-sky-100 text-sky-600 border border-sky-200 flex items-center justify-center mb-3 shadow-xs">
+                <AppIcons.copilot className="w-6 h-6" />
+              </div>
+              <h3 className="text-sm font-semibold text-slate-800 tracking-tight">
+                Ask a clinical protocol question
               </h3>
-              <p className="text-xs text-muted-foreground max-w-sm mt-1.5 leading-relaxed">
-                The multi-agent orchestrator will perform hybrid pgvector retrieval, verify evidence with specialists, and stream citations.
+              <p className="text-xs text-muted-foreground max-w-sm mt-1 leading-relaxed">
+                Queries are processed through hybrid retrieval, verified by specialist agents, and persisted to this conversation.
               </p>
+            </div>
+          ) : (
+            messages.map((msg) => {
+              const isUser = msg.role === "user";
+
+              if (isUser) {
+                return (
+                  <div key={msg.id} className="flex justify-end">
+                    <div className="max-w-[78%] bg-sky-600 text-white rounded-2xl rounded-tr-xs p-3.5 px-4 shadow-2xs">
+                      <p className="text-xs leading-relaxed whitespace-pre-wrap font-sans" dir="auto">
+                        {msg.content}
+                      </p>
+                      <div className="flex items-center justify-end gap-1.5 mt-1 text-[10px] text-sky-200 font-mono">
+                        <span>{formatRelativeTime(msg.createdAt)}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              // Assistant message
+              return (
+                <div key={msg.id} className="flex justify-start">
+                  <div className="max-w-[90%] bg-card border border-slate-200 rounded-2xl rounded-tl-xs p-4 shadow-2xs space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-800">
+                        <AppIcons.copilot className="w-3.5 h-3.5 text-sky-600" />
+                        <span>Domain Copilot</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {msg.runId && (
+                          <Link
+                            href={`/runs/${msg.runId}`}
+                            className="inline-flex items-center gap-1 text-[10px] font-mono text-slate-500 hover:text-sky-700 bg-slate-100/70 hover:bg-sky-50 px-2 py-0.5 rounded transition-colors"
+                            title="Inspect execution trace"
+                          >
+                            <span>View Run</span>
+                            <AppIcons.external className="w-2.5 h-2.5" />
+                          </Link>
+                        )}
+                        <button
+                          onClick={() => handleCopy(msg.content, msg.id)}
+                          className="text-[10px] text-slate-500 hover:text-slate-800 transition-colors p-1"
+                          title="Copy response"
+                        >
+                          {copiedMessageId === msg.id ? (
+                            <AppIcons.check className="w-3 h-3 text-emerald-600" />
+                          ) : (
+                            <AppIcons.copy className="w-3 h-3" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="prose prose-slate max-w-none text-xs text-slate-800 leading-relaxed whitespace-pre-wrap" dir="auto">
+                      {msg.content}
+                    </div>
+
+                    {/* Citations Chip Bar */}
+                    {msg.citations && msg.citations.length > 0 && (
+                      <div className="pt-2 border-t border-slate-100">
+                        <p className="text-[10px] font-mono text-muted-foreground mb-1.5 font-semibold">
+                          CITATIONS ({msg.citations.length}):
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {msg.citations.map((c, i) => (
+                            <button
+                              key={c.citationId || i}
+                              onClick={() => setSelectedCitation(c)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-50 hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-[10px] font-mono text-sky-800 transition-colors shadow-2xs"
+                            >
+                              <span>[{c.documentName}, p.{c.page || 1}]</span>
+                              <AppIcons.external className="w-2 h-2 text-slate-400" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+
+          {/* Active Live Stream Card */}
+          {streaming && (
+            <div className="flex justify-start">
+              <div className="max-w-[90%] bg-card border border-sky-300 rounded-2xl rounded-tl-xs p-4 shadow-xs space-y-3 ring-2 ring-sky-100">
+                <div className="flex items-center justify-between border-b border-sky-100 pb-2">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-800 animate-pulse">
+                    <AppIcons.activity className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Generating Grounded Protocol Synthesis...</span>
+                  </div>
+                </div>
+
+                <div className="prose prose-slate max-w-none text-xs text-slate-800 leading-relaxed whitespace-pre-wrap" dir="auto">
+                  {streamedText || (
+                    <span className="text-muted-foreground italic">Consulting domain specialists and evidence...</span>
+                  )}
+                  <span className="inline-block w-1.5 h-3.5 bg-sky-600 ml-1 animate-pulse align-middle" />
+                </div>
+
+                {streamCitations.length > 0 && (
+                  <div className="pt-2 border-t border-slate-100">
+                    <p className="text-[10px] font-mono text-muted-foreground mb-1.5 font-semibold">
+                      INCOMING CITATIONS ({streamCitations.length}):
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {streamCitations.map((c, i) => (
+                        <button
+                          key={c.citationId || i}
+                          onClick={() => setSelectedCitation(c)}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-50 hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-[10px] font-mono text-sky-800 transition-colors shadow-2xs"
+                        >
+                          <span>[{c.documentName}, p.{c.page || 1}]</span>
+                          <AppIcons.external className="w-2 h-2 text-slate-400" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
+          {/* Low Evidence Refusal Banner */}
           {isRefused && (
             <Card className="border-rose-200 bg-rose-50/50 p-4 shadow-xs">
               <div className="flex items-center gap-2 font-semibold text-rose-800 text-xs">
                 <AppIcons.warning className="w-4 h-4 text-rose-600" />
                 <span>Low-Evidence Refusal Triggered</span>
               </div>
-              <p className="text-xs text-rose-700 mt-1.5 leading-normal">{refusalMessage}</p>
-            </Card>
-          )}
-
-          {/* Twist Guard Alert Banner (TW-005) */}
-          {twistEvaluation && !twistEvaluation.isPermitted && (
-            <Card className="border-rose-200 bg-rose-50/50 p-4 shadow-xs space-y-2">
-              <div className="flex items-center justify-between font-semibold text-rose-800 text-xs">
-                <div className="flex items-center gap-2">
-                  <AppIcons.warning className="w-4 h-4 text-rose-600" />
-                  <span>Mandatory Safety Guard Active: Risk Ceiling Exceeded</span>
-                </div>
-                <Badge variant="destructive" className="font-mono text-[10px]">
-                  Risk Index: {twistEvaluation.computedRiskIndex} / Ceiling: {twistEvaluation.threshold}
-                </Badge>
-              </div>
-              <p className="text-[11px] text-rose-700 font-mono">
-                Enforced Policy: {twistEvaluation.enforcedPolicy}
-              </p>
-              {twistEvaluation.violations.length > 0 && (
-                <ul className="list-disc list-inside space-y-1 text-[11px] text-rose-700 font-mono">
-                  {twistEvaluation.violations.map((v, i) => (
-                    <li key={i}>{v}</li>
-                  ))}
-                </ul>
-              )}
+              <p className="text-xs text-rose-700 mt-1 leading-normal">{refusalMessage}</p>
             </Card>
           )}
 
           {/* HITL Approval Banner */}
           {isAwaitingApproval && pendingApproval && (
-            <Card className="border-amber-200 bg-amber-50/50 p-4 shadow-xs space-y-3">
+            <Card className="border-amber-200 bg-amber-50/60 p-4 shadow-xs space-y-3">
               <div className="flex items-center gap-2 font-semibold text-amber-900 text-xs">
                 <AppIcons.warning className="w-4 h-4 text-amber-600" />
                 <span>
@@ -859,11 +1291,11 @@ export default function CopilotPage() {
                     className="bg-amber-600 hover:bg-amber-500 text-white gap-1.5 text-xs shadow-xs"
                     asChild
                   >
-                    <a href="/reviews">
+                    <Link href="/reviews">
                       <AppIcons.warning className="w-3.5 h-3.5" />
                       Review in HITL Queue
                       <AppIcons.arrowRight className="w-3 h-3" />
-                    </a>
+                    </Link>
                   </Button>
                 )}
                 <span className="text-[10px] font-mono text-amber-700 flex items-center gap-1">
@@ -874,68 +1306,43 @@ export default function CopilotPage() {
             </Card>
           )}
 
-          {streamedText && (
-            <Card className="p-5 shadow-xs border-slate-200 bg-card">
-              <div className="prose prose-slate max-w-none text-slate-800 leading-relaxed whitespace-pre-wrap text-sm" dir="auto">
-                {normalizeDisplayText(streamedText)}
-              </div>
-            </Card>
-          )}
+          <div ref={messagesEndRef} />
+        </div>
 
-          {/* Citations Chip Bar */}
-          {citations.length > 0 && (
-            <div className="pt-2">
-              <p className="text-[11px] font-mono text-muted-foreground mb-2 font-semibold">
-                VERIFIED CITATIONS ({citations.length}):
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {citations.map((c, i) => (
-                  <button
-                    key={c.citationId || i}
-                    onClick={() => setSelectedCitation(c)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-[11px] font-mono text-sky-700 transition-colors shadow-2xs"
-                  >
-                    <span>[{c.documentName}, p.{c.page || 1}]</span>
-                    <AppIcons.external className="w-2.5 h-2.5 text-slate-400" />
-                  </button>
-                ))}
-              </div>
+        {/* Live Progress Rail (when streaming) */}
+        {streaming && (
+          <div className="px-5 py-2 border-t border-border bg-slate-50">
+            <div className="flex items-center justify-between text-[11px] font-mono mb-1.5">
+              <span className="text-muted-foreground font-semibold">LIVE AGENT PIPELINE:</span>
+              <span className="text-sky-600 font-semibold animate-pulse">Running...</span>
             </div>
-          )}
-        </div>
-
-        {/* Live Multi-Agent Progress Rail */}
-        <div className="px-5 py-2.5 border-t border-border bg-slate-50">
-          <div className="flex items-center justify-between text-[11px] font-mono mb-2">
-            <span className="text-muted-foreground font-semibold">
-              LIVE AGENT WORKFLOW:
-            </span>
-            {streaming && <span className="text-sky-600 font-semibold animate-pulse">Running...</span>}
+            <div className="flex flex-wrap gap-1.5">
+              {steps.map((step, idx) => (
+                <div
+                  key={step.agent}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono flex items-center gap-1.5 border transition-all ${
+                    step.status === "completed"
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-700 font-semibold"
+                      : step.status === "running"
+                      ? "bg-sky-50 border-sky-300 text-sky-700 font-semibold animate-pulse"
+                      : step.status === "approval_pending"
+                      ? "bg-amber-50 border-amber-300 text-amber-700 font-semibold animate-pulse"
+                      : "bg-white border-slate-200 text-slate-400"
+                  }`}
+                >
+                  <span className="font-bold">{String(idx + 1).padStart(2, "0")}</span>
+                  <span className="truncate">{step.agent}</span>
+                  {step.status === "approval_pending" && (
+                    <AppIcons.pending className="w-3 h-3 text-amber-600" />
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {steps.map((step, idx) => (
-              <div
-                key={step.agent}
-                className={`px-2.5 py-1 rounded-md text-[10px] font-mono flex items-center gap-1.5 border transition-all ${
-                  step.status === "completed"
-                    ? "bg-emerald-50 border-emerald-200 text-emerald-700 font-semibold"
-                    : step.status === "running"
-                    ? "bg-sky-50 border-sky-300 text-sky-700 font-semibold animate-pulse"
-                    : step.status === "approval_pending"
-                    ? "bg-amber-50 border-amber-300 text-amber-700 font-semibold animate-pulse"
-                    : "bg-white border-slate-200 text-slate-400"
-                }`}
-              >
-                <span className="font-bold">{String(idx + 1).padStart(2, "0")}</span>
-                <span className="truncate">{step.agent}</span>
-                {step.status === "approval_pending" && <AppIcons.pending className="w-3 h-3 text-amber-600" />}
-              </div>
-            ))}
-          </div>
-        </div>
+        )}
 
         {/* Question Composer Form */}
-        <form onSubmit={handleSubmit} className="p-4 border-t border-border bg-card">
+        <form onSubmit={handleSubmit} className="p-3.5 px-4 border-t border-border bg-card">
           <div className="flex gap-2">
             <textarea
               value={query}
@@ -949,7 +1356,7 @@ export default function CopilotPage() {
               dir="auto"
               rows={2}
               placeholder="Ask a question grounded in the clinical protocol corpus (English or Arabic)..."
-              className="flex-1 bg-white border border-slate-200 rounded-lg p-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 resize-none font-sans"
+              className="flex-1 bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 resize-none font-sans"
             />
             {streaming ? (
               <Button
@@ -965,28 +1372,30 @@ export default function CopilotPage() {
               <Button
                 type="submit"
                 disabled={!query.trim()}
-                className="gap-1.5 text-xs font-semibold shrink-0 h-auto px-5 shadow-xs"
+                className="gap-1.5 text-xs font-semibold shrink-0 h-auto px-4 shadow-xs"
               >
                 <AppIcons.send className="w-3.5 h-3.5" />
-                Run
+                Send
               </Button>
             )}
           </div>
         </form>
       </div>
 
-      {/* Side Evidence Drawer (RET-003) */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* 3. Side Evidence Drawer (RET-003)                              */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
       {selectedCitation && (
         <div className="w-80 bg-card border border-border rounded-xl flex flex-col shrink-0 shadow-lg overflow-hidden animate-in slide-in-from-right-5">
-          <div className="p-4 border-b border-border bg-slate-50 flex items-center justify-between">
+          <div className="p-3.5 border-b border-border bg-slate-50 flex items-center justify-between">
             <h3 className="text-xs font-bold text-foreground font-mono">
-              SOURCE EVIDENCE DRAWER
+              VERIFIED SOURCE CITATION
             </h3>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setSelectedCitation(null)}
-              className="h-7 px-2 text-xs text-slate-500 hover:text-foreground"
+              className="h-6 px-2 text-xs text-slate-500 hover:text-foreground"
             >
               Close
             </Button>
@@ -1003,19 +1412,22 @@ export default function CopilotPage() {
                 <span>Page:</span> <strong className="text-slate-800">{selectedCitation.page || 1}</strong>
               </div>
               <div className="p-2 rounded-md bg-slate-50 border border-slate-200">
-                <span>RRF Score:</span> <strong className="text-emerald-600">{selectedCitation.score}</strong>
+                <span>RRF Score:</span> <strong className="text-emerald-600">{selectedCitation.score || "N/A"}</strong>
               </div>
             </div>
 
             <div className="space-y-1">
               <p className="text-[11px] font-mono text-muted-foreground">Verbatim Stored Chunk:</p>
-              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 font-mono text-[11px] text-slate-800 leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap" dir="auto">
+              <div
+                className="p-3 rounded-lg bg-slate-50 border border-slate-200 font-mono text-[11px] text-slate-800 leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap"
+                dir="auto"
+              >
                 {selectedCitation.excerpt}
               </div>
             </div>
 
             <div className="p-2.5 rounded-md bg-sky-50 border border-sky-200 text-[10px] font-mono text-sky-800">
-              ✓ Grounded Citation verified against pgvector similarity index.
+              ✓ Grounded citation verified from persistent storage.
             </div>
           </div>
         </div>
