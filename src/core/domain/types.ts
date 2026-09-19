@@ -224,3 +224,23 @@ export interface EvaluationResult {
   notes?: string;
   executedAt: string;
 }
+
+export interface Conversation {
+  id: string;
+  ownerId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Message {
+  id: string;
+  conversationId: string;
+  runId?: string | null;
+  role: "user" | "assistant";
+  content: string;
+  citations?: Citation[] | null;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
