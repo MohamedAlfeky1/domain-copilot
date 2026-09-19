@@ -48,6 +48,7 @@ export interface AgentProgressEvent {
   message?: string;
   data?: unknown;
   token?: string;
+  finalAnswer?: string;
 }
 
 export type WorkflowResult = {
@@ -95,15 +96,29 @@ function createStepTimeout(ms: number, agentName: string): { promise: Promise<ne
   return { promise, clear };
 }
 
+declare global {
+  var __orchestratorPausedStatesInstance: Map<string, PausedWorkflowState> | undefined;
+}
+
+const globalPausedStates =
+  globalThis.__orchestratorPausedStatesInstance ?? new Map<string, PausedWorkflowState>();
+if (process.env.NODE_ENV !== "production") {
+  globalThis.__orchestratorPausedStatesInstance = globalPausedStates;
+}
+
+export interface MultiAgentOrchestratorOptions {
+  stepTimeoutMs?: number;
+}
+
 export class MultiAgentOrchestrator {
   private readonly MAX_ITERATIONS = 5;
-  private readonly STEP_TIMEOUT_MS = 30000;
+  private readonly stepTimeoutMs: number;
 
   /**
    * In-memory store for paused workflow state.
    * Keyed by runId. Cleared on resume or failure.
    */
-  private pausedStates: Map<string, PausedWorkflowState> = new Map();
+  private pausedStates: Map<string, PausedWorkflowState> = globalPausedStates;
 
   constructor(
     private db: IDatabasePort,
@@ -111,8 +126,13 @@ export class MultiAgentOrchestrator {
     private retriever: HybridRetrievalService,
     private tools: ToolRegistry,
     private approvalService: ApprovalService,
-    private twistPort: ITwistPort
-  ) {}
+    private twistPort: ITwistPort,
+    options?: MultiAgentOrchestratorOptions
+  ) {
+    this.stepTimeoutMs =
+      options?.stepTimeoutMs ??
+      (process.env.STEP_TIMEOUT_MS ? parseInt(process.env.STEP_TIMEOUT_MS, 10) : 30000);
+  }
 
   /**
    * Check if a run is paused awaiting approval.
@@ -122,15 +142,57 @@ export class MultiAgentOrchestrator {
   }
 
   /**
+   * Determines if the auditor output warrants HITL pause.
+   * HITL is for side-effecting / consequential operations (HITL-001 spec),
+   * NOT for informational data-quality or scope concerns.
+   *
+   * Returns true when at least one of:
+   *  1. Twist Guard tripped (deterministic safety floor)
+   *  2. Auditor flagged review AND at least one risk flag is genuinely
+   *     consequential (not merely data-completeness / scope / informational)
+   */
+  private isConsequentialHITLRequired(
+    auditorOutput: AuditorOutput,
+    twistResult: TwistEvaluationResult
+  ): boolean {
+    // 1. Twist Guard tripped -> always HITL
+    if (!twistResult.isPermitted) return true;
+
+    // 2. If auditor didn't flag for review, no HITL
+    if (!auditorOutput.requiresHumanReview) return false;
+
+    // 3. Filter out informational / data-quality risk types
+    const INFORMATIONAL_PATTERNS = [
+      "data completeness",
+      "compliance violation",
+      "scope",
+      "insufficient",
+      "incomplete",
+      "out of scope",
+      "unrelated",
+      "outside the scope",
+      "no further action",
+    ];
+
+    const consequentialFlags = auditorOutput.riskFlags.filter((flag) => {
+      if (flag.severity !== "HIGH" && flag.severity !== "CRITICAL") return false;
+      const riskLower = (flag.riskType + " " + flag.detail).toLowerCase();
+      return !INFORMATIONAL_PATTERNS.some((p) => riskLower.includes(p));
+    });
+
+    return consequentialFlags.length > 0;
+  }
+
+  /**
    * Execute a single agent step with tool-calling loop.
    * Bounded by MAX_ITERATIONS to prevent infinite loops.
-   * Each iteration enforced by STEP_TIMEOUT_MS.
+   * Each iteration enforced by stepTimeoutMs.
    */
   private async executeAgentWithTools(
     agentName: string,
     systemPrompt: string,
     runId: string,
-    options?: { model?: string; temperature?: number }
+    options?: { model?: string; temperature?: number; maxTokens?: number }
   ): Promise<string> {
     const toolDefs = this.tools.getToolsForAgent(agentName);
     const messages: CompletionMessage[] = [
@@ -138,13 +200,14 @@ export class MultiAgentOrchestrator {
     ];
 
     for (let iteration = 0; iteration < this.MAX_ITERATIONS; iteration++) {
-      const timeout = createStepTimeout(this.STEP_TIMEOUT_MS, agentName);
+      const timeout = createStepTimeout(this.stepTimeoutMs, agentName);
 
       try {
         const result = await Promise.race([
           this.aiProvider.generateCompletion(messages, {
             model: options?.model,
             temperature: options?.temperature ?? 0.1,
+            maxTokens: options?.maxTokens,
             tools: toolDefs.length > 0 ? toolDefs : undefined,
           }),
           timeout.promise,
@@ -212,7 +275,7 @@ export class MultiAgentOrchestrator {
     systemPrompt: string,
     schema: import("zod").ZodSchema<T>,
     runId: string,
-    options?: { model?: string; temperature?: number }
+    options?: { model?: string; temperature?: number; maxTokens?: number }
   ): Promise<{ validated: T; rawText: string }> {
     let lastError: Error | null = null;
 
@@ -341,7 +404,7 @@ export class MultiAgentOrchestrator {
 
     let finalSynthesis = "";
     let streamRes: CompletionResult | undefined;
-    const streamTimeout = createStepTimeout(this.STEP_TIMEOUT_MS, specialists[2]);
+    const streamTimeout = createStepTimeout(this.stepTimeoutMs, specialists[2]);
 
     try {
       streamRes = await Promise.race([
@@ -382,9 +445,10 @@ export class MultiAgentOrchestrator {
 
     // Record Cost & Tokens (OBS-002)
     const totalTokens = totalPromptTokens + totalCompletionTokens;
-    const promptCost = (totalPromptTokens / 1_000_000) * 2.50;
-    const completionCost = (totalCompletionTokens / 1_000_000) * 10.00;
-    const totalCostUsd = promptCost + completionCost;
+    const totalCostUsd =
+      typeof this.aiProvider.calculateCost === "function"
+        ? this.aiProvider.calculateCost(totalPromptTokens, totalCompletionTokens)
+        : (totalPromptTokens / 1_000_000) * 2.50 + (totalCompletionTokens / 1_000_000) * 10.00;
 
     await this.db.recordUsage({
       id: `usage-${runId}`,
@@ -402,13 +466,19 @@ export class MultiAgentOrchestrator {
 
     // Mark Run Completed
     const finalAnswer = drafterOutput.synthesis;
+    const completedRun = await this.db.getRunById(runId);
+    if (completedRun) {
+      completedRun.citations = retrievalCitations;
+    }
     await this.db.updateRunStatus(runId, "COMPLETED", undefined, finalAnswer);
     emitEvent?.({
       type: "done",
+      finalAnswer,
       data: {
         totalTokens,
         totalCostUsd,
         citationsCount: retrievalCitations.length,
+        finalAnswer,
       },
     });
 
@@ -445,6 +515,12 @@ export class MultiAgentOrchestrator {
       const retStep = await this.createStep(runId, ++stepIndex, "Retrieval Engine", "RETRIEVAL", emitEvent, { query, filters });
       const retrievalResult: RetrievalResult = await this.retriever.retrieve(query, filters, correlationId);
       await this.completeStep(retStep, retrievalResult.trace, Date.now() - startRet, emitEvent);
+
+      // Persist citations on run record for inspection / rehydration
+      const runForCitations = await this.db.getRunById(runId);
+      if (runForCitations) {
+        runForCitations.citations = retrievalResult.citations;
+      }
 
       // Emit citations immediately
       for (const cite of retrievalResult.citations) {
@@ -501,7 +577,7 @@ export class MultiAgentOrchestrator {
         s1Prompt,
         ExtractorOutputSchema,
         runId,
-        { temperature: 0.1 }
+        { temperature: 0.1, maxTokens: 600 }
       );
 
       await this.completeStep(s1Step, { findings: extractorOutput }, Date.now() - startS1, emitEvent);
@@ -581,9 +657,11 @@ export class MultiAgentOrchestrator {
       }
 
       // ═══════════════════════════════════════════════════════════════
-      // HITL-001/002: If auditor requires human review, CREATE approval and PAUSE
+      // HITL-001/002: If auditor flags a genuinely consequential risk, CREATE approval and PAUSE
+      // Informational data-quality / scope flags are passed to the Drafter instead.
       // ═══════════════════════════════════════════════════════════════
-      if (auditorOutput.requiresHumanReview) {
+      const hitlRequired = this.isConsequentialHITLRequired(auditorOutput, twistResult);
+      if (hitlRequired) {
         // Create HITL approval gate step
         const gateStep = await this.createStep(runId, ++stepIndex, "HITL Approval Gate", "APPROVAL_GATE", emitEvent, {
           riskFlags: auditorOutput.riskFlags,
@@ -708,7 +786,34 @@ export class MultiAgentOrchestrator {
     emitEvent?: (event: AgentProgressEvent) => void,
     signal?: AbortSignal
   ): Promise<WorkflowResult> {
-    const pausedState = this.pausedStates.get(runId);
+    let pausedState = this.pausedStates.get(runId);
+    if (!pausedState) {
+      const approvalRec = await this.db.getApprovalById(approvalId);
+      const runRec = await this.db.getRunById(runId);
+      if (approvalRec && runRec && approvalRec.originalPayload) {
+        const payload = approvalRec.originalPayload as any;
+        if (payload.auditorOutput) {
+          pausedState = {
+            runId,
+            query: runRec.query,
+            sessionId: runRec.sessionId,
+            correlationId: runRec.correlationId,
+            extractorOutput: payload.extractorOutput,
+            auditorOutput: payload.auditorOutput,
+            evidenceContext: payload.evidenceContext || "",
+            retrievalCitations: runRec.citations || [],
+            evidenceScores: [],
+            approvalId: approvalRec.id,
+            stepIndex: 5,
+            totalPromptTokens: 0,
+            totalCompletionTokens: 0,
+            filters: runRec.filters as any,
+          };
+          this.pausedStates.set(runId, pausedState);
+        }
+      }
+    }
+
     if (!pausedState) {
       throw new ValidationError(
         `No paused workflow found for run "${runId}". The run may have already completed or expired.`

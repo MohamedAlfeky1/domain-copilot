@@ -8,6 +8,7 @@ import dotenv from "dotenv";
 import { IAIProviderPort } from "../../core/application/ports/ai-provider.port";
 import { OpenAIProviderAdapter } from "./openai.adapter";
 import { OpenRouterProviderAdapter } from "./openrouter.adapter";
+import { OllamaProviderAdapter } from "./ollama.adapter";
 import { GeminiEmbeddingAdapter } from "./gemini-embedding.adapter";
 
 dotenv.config();
@@ -31,10 +32,31 @@ export interface AIProviderConfig {
   baseUrl?: string;
   model?: string;
   embeddingModel?: string;
+  think?: boolean;
+  keepAlive?: string;
 }
 
-export type SupportedAIProvider = "openai" | "openrouter";
-export const SUPPORTED_AI_PROVIDERS: readonly SupportedAIProvider[] = ["openai", "openrouter"] as const;
+export type SupportedAIProvider = "openai" | "openrouter" | "ollama";
+export const SUPPORTED_AI_PROVIDERS: readonly SupportedAIProvider[] = [
+  "openai",
+  "openrouter",
+  "ollama",
+] as const;
+
+/**
+ * Resolves the bounded step timeout in milliseconds based on AI provider.
+ * Cloud providers remain bounded at 30s; local providers (Ollama) use 60s
+ * to absorb token generation latency without tripping the circuit breaker.
+ */
+export function resolveStepTimeoutMs(providerName?: string): number {
+  const provider = (providerName || process.env.AI_PROVIDER || "").trim().toLowerCase();
+  if (provider === "ollama") {
+    const raw = process.env.OLLAMA_STEP_TIMEOUT_MS || process.env.STEP_TIMEOUT_MS;
+    return raw ? parseInt(raw, 10) : 60000;
+  }
+  const raw = process.env.STEP_TIMEOUT_MS;
+  return raw ? parseInt(raw, 10) : 30000;
+}
 
 /**
  * Resolves and instantiates an AI provider (LLM completions, streaming, tool calling).
@@ -67,6 +89,18 @@ export function resolveAIProvider(config?: AIProviderConfig): IAIProviderPort {
       const baseUrl = config?.baseUrl ?? process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
       const model = config?.model ?? process.env.OPENROUTER_MODEL ?? process.env.AI_MODEL ?? "openai/gpt-4o";
       return new OpenRouterProviderAdapter({ apiKey, baseUrl, defaultModel: model });
+    }
+    case "ollama": {
+      const baseUrl =
+        config?.baseUrl ?? process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
+      const model =
+        config?.model ?? process.env.OLLAMA_MODEL ?? "qwen3:8b";
+      return new OllamaProviderAdapter({
+        baseUrl,
+        defaultModel: model,
+        think: config?.think,
+        keepAlive: config?.keepAlive,
+      });
     }
     default: {
       throw new ConfigurationError(

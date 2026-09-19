@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { AppIcons } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 
 interface Citation {
   citationId: string;
@@ -28,6 +28,44 @@ interface ApprovalInfo {
   riskLevel: string;
   proposedAction: string;
   riskFlags: Array<{ riskType: string; severity: string; detail: string }>;
+  status?: string;
+}
+
+/**
+ * Presentation normalization helper.
+ * If the value is already plain text, returns it unchanged.
+ * If the value is a JSON string or object containing { "synthesis": "..." },
+ * extracts and returns only the synthesis text.
+ * If parsing fails, returns the original text.
+ */
+function normalizeDisplayText(raw: unknown): string {
+  if (typeof raw !== "string") {
+    if (raw && typeof raw === "object" && "synthesis" in (raw as any) && typeof (raw as any).synthesis === "string") {
+      return (raw as any).synthesis;
+    }
+    return raw ? String(raw) : "";
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+
+  if (trimmed.startsWith("{") && trimmed.includes('"synthesis"')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed.synthesis === "string") {
+        return parsed.synthesis;
+      }
+    } catch {
+      const match = trimmed.match(/"synthesis"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      if (match) {
+        try {
+          return JSON.parse(`"${match[1]}"`);
+        } catch {}
+      }
+    }
+  }
+
+  return raw;
 }
 
 export default function CopilotPage() {
@@ -39,6 +77,7 @@ export default function CopilotPage() {
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
   const [isRefused, setIsRefused] = useState(false);
   const [refusalMessage, setRefusalMessage] = useState("");
+  const [accessDeniedMessage, setAccessDeniedMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   // HITL approval state
@@ -64,6 +103,333 @@ export default function CopilotPage() {
   ]);
 
   const eventSourceRef = useRef<EventSource | null>(null);
+  const resumeInProgressRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const initialMountDone = useRef(false);
+
+  const resumeWorkflow = useCallback(async (runId: string, approvalId: string) => {
+    if (resumeInProgressRef.current) return;
+    resumeInProgressRef.current = true;
+    setStreaming(true);
+    setIsAwaitingApproval(false);
+
+    // Strip resume=true from URL immediately to prevent duplicate runs on page reload
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("resume");
+      window.history.replaceState(null, "", url.pathname + url.search);
+    } catch {}
+
+    // Update steps: mark HITL gate completed, mark Drafter running
+    setSteps((prev) => {
+      const hasGate = prev.some((s) => s.agent.toLowerCase().includes("hitl"));
+      const updated = prev.map((s) => {
+        if (s.agent.toLowerCase().includes("hitl")) {
+          return { ...s, status: "completed" as const };
+        }
+        if (s.agent.toLowerCase().includes("drafter") || s.agent.toLowerCase().includes("therapeutic")) {
+          return { ...s, status: "running" as const };
+        }
+        return s;
+      });
+      if (!hasGate) {
+        const drafterIdx = updated.findIndex(
+          (s) => s.agent.toLowerCase().includes("drafter") || s.agent.toLowerCase().includes("therapeutic")
+        );
+        const gate = { agent: "HITL Approval Gate", status: "completed" as const };
+        if (drafterIdx !== -1) {
+          updated.splice(drafterIdx, 0, gate);
+        } else {
+          updated.push(gate);
+        }
+      }
+      return updated;
+    });
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    try {
+      const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approvalId }),
+        signal: abortController.signal,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Resume failed with HTTP ${res.status}`);
+      }
+
+      if (!res.body) {
+        throw new Error("No response body returned from resume endpoint");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+
+        for (const part of parts) {
+          if (!part.trim()) continue;
+          let eventType = "message";
+          let dataStr = "";
+          const lines = part.split("\n");
+          for (const line of lines) {
+            if (line.startsWith("event:")) {
+              eventType = line.replace(/^event:\s*/, "").trim();
+            } else if (line.startsWith("data:")) {
+              dataStr += line.replace(/^data:\s*/, "");
+            }
+          }
+
+          if (dataStr) {
+            try {
+              const data = JSON.parse(dataStr);
+              if (eventType === "run_resumed") {
+                setStreaming(true);
+                setIsAwaitingApproval(false);
+                setPendingApproval(null);
+              } else if (eventType === "step_start") {
+                setSteps((prev) =>
+                  prev.map((s) => {
+                    const match =
+                      s.agent.toLowerCase().includes(data.agent?.toLowerCase() || "") ||
+                      (data.agent && data.agent.toLowerCase().includes(s.agent.toLowerCase()));
+                    return match ? { ...s, status: "running" } : s;
+                  })
+                );
+              } else if (eventType === "step_complete") {
+                setSteps((prev) =>
+                  prev.map((s) => {
+                    const match =
+                      s.agent.toLowerCase().includes(data.agent?.toLowerCase() || "") ||
+                      (data.agent && data.agent.toLowerCase().includes(s.agent.toLowerCase()));
+                    return match ? { ...s, status: "completed" } : s;
+                  })
+                );
+              } else if (eventType === "token") {
+                setStreamedText((prev) => prev + (data.token || ""));
+              } else if (eventType === "citation") {
+                const item = data.data || data;
+                if (item && item.chunkId) {
+                  setCitations((prev) => {
+                    const exists = prev.some((c) => c.chunkId === item.chunkId);
+                    return exists ? prev : [...prev, item];
+                  });
+                }
+              } else if (eventType === "done") {
+                setStreaming(false);
+                setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" })));
+                const cleanAnswer = data.finalAnswer || data.data?.finalAnswer;
+                if (cleanAnswer) {
+                  setStreamedText(normalizeDisplayText(cleanAnswer));
+                } else {
+                  setStreamedText((prev) => normalizeDisplayText(prev));
+                }
+                if (Array.isArray(data.citations) && data.citations.length > 0) {
+                  setCitations(data.citations);
+                } else if (Array.isArray(data.data?.citations) && data.data.citations.length > 0) {
+                  setCitations(data.data.citations);
+                }
+                try {
+                  localStorage.removeItem("copilot_active_run_id");
+                } catch {}
+              } else if (eventType === "refusal") {
+                setIsRefused(true);
+                setRefusalMessage(data.message || "Request was refused.");
+                setStreaming(false);
+                try {
+                  localStorage.removeItem("copilot_active_run_id");
+                } catch {}
+              } else if (eventType === "error") {
+                setStreaming(false);
+                if (data.message) {
+                  setStreamedText((prev) => prev || `Workflow notification: ${data.message}`);
+                }
+                setSteps((prev) =>
+                  prev.map((s) => (s.status === "running" ? { ...s, status: "completed" } : s))
+                );
+              }
+            } catch (e) {
+              console.warn("Failed to parse SSE payload:", e);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err.name !== "AbortError") {
+        alert(`Resume failed: ${err.message}`);
+      }
+      setStreaming(false);
+    } finally {
+      resumeInProgressRef.current = false;
+    }
+  }, []);
+
+  // Mount-time rehydration effect
+  useEffect(() => {
+    if (initialMountDone.current) return;
+    initialMountDone.current = true;
+
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const urlRunId = params.get("runId");
+    let storedRunId: string | null = null;
+    try {
+      storedRunId = localStorage.getItem("copilot_active_run_id");
+    } catch {}
+
+    const targetRunId = urlRunId || storedRunId;
+    const shouldResume = params.get("resume") === "true";
+
+    if (!targetRunId) return;
+
+    let isCancelled = false;
+
+    async function rehydrate(runId: string) {
+      try {
+        const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
+        if (!res.ok) {
+          if (res.status === 401) {
+            const currentPath = window.location.pathname + window.location.search;
+            window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
+            return;
+          }
+
+          let errMessage = `Failed to load run (HTTP ${res.status})`;
+          try {
+            const errData = await res.json();
+            if (errData?.error) errMessage = errData.error;
+          } catch {}
+
+          if (res.status === 404) {
+            try {
+              localStorage.removeItem("copilot_active_run_id");
+            } catch {}
+            errMessage = "The requested run was not found.";
+          }
+
+          if (isCancelled) return;
+          setAccessDeniedMessage(errMessage);
+          setStreaming(false);
+          setIsAwaitingApproval(false);
+          setPendingApproval(null);
+          return;
+        }
+
+        const data = await res.json();
+        if (isCancelled) return;
+
+        const { run, approval } = data;
+        if (!run) return;
+
+        setCurrentRunId(run.id);
+        if (run.query) setQuery(run.query);
+
+        if (run.citations && Array.isArray(run.citations)) {
+          setCitations(run.citations);
+        }
+
+        const answerText = run.finalOutput || run.answer;
+        if (answerText) {
+          setStreamedText(normalizeDisplayText(answerText));
+        }
+
+        if (run.status === "COMPLETED") {
+          setStreaming(false);
+          setIsAwaitingApproval(false);
+          setPendingApproval(null);
+          setSteps([
+            { agent: "Retrieval Engine (Cross-Lingual AR+EN)", status: "completed" },
+            { agent: "Clinical Evidence Extractor", status: "completed" },
+            { agent: "Contraindication & Safety Auditor", status: "completed" },
+            { agent: "Bilingual Context & Policy Guard", status: "completed" },
+            ...(approval ? [{ agent: "HITL Approval Gate", status: "completed" as const }] : []),
+            { agent: "Therapeutic Protocol Drafter", status: "completed" },
+          ]);
+          try {
+            localStorage.removeItem("copilot_active_run_id");
+            if (shouldResume) {
+              const url = new URL(window.location.href);
+              url.searchParams.delete("resume");
+              window.history.replaceState(null, "", url.pathname + url.search);
+            }
+          } catch {}
+        } else if (run.status === "REFUSED") {
+          setStreaming(false);
+          setIsRefused(true);
+          setRefusalMessage(run.refusalReason || run.answer || "Request refused by policy or human reviewer.");
+          setIsAwaitingApproval(false);
+          setPendingApproval(null);
+          try {
+            localStorage.removeItem("copilot_active_run_id");
+          } catch {}
+        } else if (run.status === "FAILED" || run.status === "CANCELLED") {
+          setStreaming(false);
+          setIsAwaitingApproval(false);
+          setPendingApproval(null);
+          setStreamedText(run.error || run.answer || `Workflow was ${run.status.toLowerCase()}.`);
+          try {
+            localStorage.removeItem("copilot_active_run_id");
+          } catch {}
+        } else if (run.status === "APPROVAL_PENDING") {
+          const isApproved = approval && (approval.status === "APPROVED" || approval.status === "EDIT_APPROVED");
+
+          setSteps([
+            { agent: "Retrieval Engine (Cross-Lingual AR+EN)", status: "completed" },
+            { agent: "Clinical Evidence Extractor", status: "completed" },
+            { agent: "Contraindication & Safety Auditor", status: "completed" },
+            { agent: "Bilingual Context & Policy Guard", status: "completed" },
+            {
+              agent: "HITL Approval Gate",
+              status: isApproved ? "completed" : "approval_pending",
+            },
+            { agent: "Therapeutic Protocol Drafter", status: "pending" },
+          ]);
+
+          if (approval) {
+            setPendingApproval({
+              approvalId: approval.id,
+              riskLevel: approval.riskLevel || "HIGH",
+              proposedAction: approval.proposedAction || "Action requires human review",
+              riskFlags: (approval.originalPayload?.flags as any[]) || [],
+              status: approval.status,
+            });
+          }
+
+          if (shouldResume && isApproved && !resumeInProgressRef.current) {
+            setIsAwaitingApproval(false);
+            await resumeWorkflow(run.id, approval.id);
+          } else {
+            setIsAwaitingApproval(true);
+          }
+        } else if (run.status === "RUNNING" || run.status === "STREAMING") {
+          setStreaming(true);
+          setSteps((prev) =>
+            prev.map((s, idx) => (idx === 0 ? { ...s, status: "running" } : s))
+          );
+        }
+      } catch (err) {
+        console.error("Mount rehydration failed:", err);
+      }
+    }
+
+    rehydrate(targetRunId);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [resumeWorkflow]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -74,6 +440,7 @@ export default function CopilotPage() {
     setCitations([]);
     setIsRefused(false);
     setRefusalMessage("");
+    setAccessDeniedMessage(null);
     setPendingApproval(null);
     setIsAwaitingApproval(false);
     setSelectedCitation(null);
@@ -102,6 +469,10 @@ export default function CopilotPage() {
 
       const { runId } = await initRes.json();
       setCurrentRunId(runId);
+      try {
+        localStorage.setItem("copilot_active_run_id", runId);
+        window.history.replaceState(null, "", `/copilot?runId=${encodeURIComponent(runId)}`);
+      } catch {}
 
       // Open SSE stream
       const sse = new EventSource(`/api/runs/${runId}/stream`);
@@ -153,6 +524,9 @@ export default function CopilotPage() {
               : { ...s, status: "pending" }
           )
         );
+        try {
+          localStorage.removeItem("copilot_active_run_id");
+        } catch {}
         sse.close();
       });
 
@@ -173,6 +547,7 @@ export default function CopilotPage() {
           riskLevel: approvalData.riskLevel || "HIGH",
           proposedAction: approvalData.proposedAction || "Action requires human review",
           riskFlags: approvalData.riskFlags || [],
+          status: "PENDING",
         });
         setIsAwaitingApproval(true);
         setStreaming(false);
@@ -188,9 +563,27 @@ export default function CopilotPage() {
         sse.close();
       });
 
-      sse.addEventListener("done", () => {
+      sse.addEventListener("done", (evt: any) => {
         setStreaming(false);
         setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" })));
+        if (evt?.data) {
+          try {
+            const data = JSON.parse(evt.data);
+            const cleanAnswer = data.finalAnswer || data.data?.finalAnswer;
+            if (cleanAnswer) {
+              setStreamedText(normalizeDisplayText(cleanAnswer));
+            } else {
+              setStreamedText((prev) => normalizeDisplayText(prev));
+            }
+          } catch {
+            setStreamedText((prev) => normalizeDisplayText(prev));
+          }
+        } else {
+          setStreamedText((prev) => normalizeDisplayText(prev));
+        }
+        try {
+          localStorage.removeItem("copilot_active_run_id");
+        } catch {}
         sse.close();
       });
 
@@ -228,16 +621,48 @@ export default function CopilotPage() {
 
   const handleCancel = async () => {
     if (currentRunId) {
-      await fetch(`/api/runs/${currentRunId}/cancel`, { method: "POST" });
+      await fetch(`/api/runs/${currentRunId}/cancel`, { method: "POST" }).catch(() => {});
     }
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
     }
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
     setStreaming(false);
+    try {
+      localStorage.removeItem("copilot_active_run_id");
+    } catch {}
+  };
+
+  const handleNewQuery = () => {
+    if (streaming) return;
+    setCurrentRunId(null);
+    setQuery("");
+    setStreamedText("");
+    setCitations([]);
+    setSelectedCitation(null);
+    setIsRefused(false);
+    setRefusalMessage("");
+    setAccessDeniedMessage(null);
+    setPendingApproval(null);
+    setIsAwaitingApproval(false);
+    setTwistEvaluation(null);
+    setSteps([
+      { agent: "Retrieval Engine (Cross-Lingual AR+EN)", status: "pending" },
+      { agent: "Clinical Evidence Extractor", status: "pending" },
+      { agent: "Contraindication & Safety Auditor", status: "pending" },
+      { agent: "Bilingual Context & Policy Guard", status: "pending" },
+      { agent: "Therapeutic Protocol Drafter", status: "pending" },
+    ]);
+    try {
+      localStorage.removeItem("copilot_active_run_id");
+      window.history.replaceState(null, "", "/copilot");
+    } catch {}
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(streamedText);
+    navigator.clipboard.writeText(normalizeDisplayText(streamedText));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -283,6 +708,18 @@ export default function CopilotPage() {
               </Badge>
             ) : null}
 
+            {currentRunId && !streaming && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleNewQuery}
+                className="h-7 px-2.5 text-xs gap-1 text-slate-700"
+              >
+                <AppIcons.plus className="w-3 h-3" />
+                <span>New Query</span>
+              </Button>
+            )}
+
             {streamedText && (
               <Button
                 variant="outline"
@@ -299,7 +736,27 @@ export default function CopilotPage() {
 
         {/* Answer Content Panel */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4 font-sans text-sm leading-relaxed bg-slate-50/30 flex flex-col">
-          {streamedText.length === 0 && !isRefused && (
+          {accessDeniedMessage && (
+            <Card className="border-rose-200 bg-rose-50/50 p-4 shadow-xs space-y-2">
+              <div className="flex items-center gap-2 font-semibold text-rose-800 text-xs">
+                <AppIcons.warning className="w-4 h-4 text-rose-600" />
+                <span>Access Restricted</span>
+              </div>
+              <p className="text-xs text-rose-700 leading-normal">{accessDeniedMessage}</p>
+              <div className="pt-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs border-rose-300 text-rose-800 hover:bg-rose-100/50 shadow-2xs"
+                  onClick={handleNewQuery}
+                >
+                  Start New Query
+                </Button>
+              </div>
+            </Card>
+          )}
+
+          {streamedText.length === 0 && !isRefused && !isAwaitingApproval && !accessDeniedMessage && (
             <div className="flex-1 flex flex-col items-center justify-center text-center py-12 px-4 select-none">
               <AppIcons.copilot
                 className="w-7 h-7 text-sky-500 mb-3.5 shrink-0"
@@ -354,7 +811,11 @@ export default function CopilotPage() {
             <Card className="border-amber-200 bg-amber-50/50 p-4 shadow-xs space-y-3">
               <div className="flex items-center gap-2 font-semibold text-amber-900 text-xs">
                 <AppIcons.warning className="w-4 h-4 text-amber-600" />
-                <span>Workflow Paused: Human Approval Required</span>
+                <span>
+                  {pendingApproval.status === "APPROVED" || pendingApproval.status === "EDIT_APPROVED"
+                    ? "Workflow Approved: Ready to Resume"
+                    : "Workflow Paused: Human Approval Required"}
+                </span>
               </div>
               <p className="text-xs text-amber-800 leading-normal">{pendingApproval.proposedAction}</p>
 
@@ -378,17 +839,33 @@ export default function CopilotPage() {
               )}
 
               <div className="flex items-center gap-3 pt-1">
-                <Button
-                  size="sm"
-                  className="bg-amber-600 hover:bg-amber-500 text-white gap-1.5 text-xs shadow-xs"
-                  asChild
-                >
-                  <a href="/reviews">
-                    <AppIcons.warning className="w-3.5 h-3.5" />
-                    Review in HITL Queue
+                {pendingApproval.status === "APPROVED" || pendingApproval.status === "EDIT_APPROVED" ? (
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5 text-xs shadow-xs"
+                    onClick={() => {
+                      if (currentRunId && pendingApproval.approvalId) {
+                        resumeWorkflow(currentRunId, pendingApproval.approvalId);
+                      }
+                    }}
+                  >
+                    <AppIcons.success className="w-3.5 h-3.5" />
+                    Resume Workflow Now
                     <AppIcons.arrowRight className="w-3 h-3" />
-                  </a>
-                </Button>
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    className="bg-amber-600 hover:bg-amber-500 text-white gap-1.5 text-xs shadow-xs"
+                    asChild
+                  >
+                    <a href="/reviews">
+                      <AppIcons.warning className="w-3.5 h-3.5" />
+                      Review in HITL Queue
+                      <AppIcons.arrowRight className="w-3 h-3" />
+                    </a>
+                  </Button>
+                )}
                 <span className="text-[10px] font-mono text-amber-700 flex items-center gap-1">
                   <AppIcons.pending className="w-3 h-3" />
                   Approval ID: {pendingApproval.approvalId}
@@ -400,7 +877,7 @@ export default function CopilotPage() {
           {streamedText && (
             <Card className="p-5 shadow-xs border-slate-200 bg-card">
               <div className="prose prose-slate max-w-none text-slate-800 leading-relaxed whitespace-pre-wrap text-sm" dir="auto">
-                {streamedText}
+                {normalizeDisplayText(streamedText)}
               </div>
             </Card>
           )}

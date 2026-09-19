@@ -14,16 +14,24 @@ export async function GET(
     if (!run) {
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
     }
-    requireRunAccess(user, run);
+    const approvals = await container.db.listApprovals();
+    const approval = approvals.find((a) => a.runId === run.id) || null;
+    requireRunAccess(user, run, approval);
 
     const steps = await container.db.getRunSteps(run.id);
     const usage = await container.db.getUsageByRun(run.id);
 
+    const normalizedRun = {
+      ...run,
+      answer: run.finalOutput || (run as any).answer || "",
+    };
+
     return NextResponse.json({
-      run,
+      run: normalizedRun,
       steps,
       usage,
       stepCount: steps.length,
+      approval,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: error.httpStatus || 500 });
