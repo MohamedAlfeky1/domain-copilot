@@ -11,6 +11,7 @@
     "lint:arch": "node scripts/lint-arch.js",
     "test": "node scripts/test-unit.js",
     "test:unit": "node scripts/test-unit.js",
+    "test:chat": "node scripts/test-chat-history.js",
     "test:integration": "node scripts/test-integration.js",
     "test:auth": "node scripts/test-auth-rbac.js",
     "test:retrieval": "node scripts/test-retrieval.js",
