@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { AppIcons } from "@/components/ui/icons";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,16 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import { toast } from "@/components/ui/use-toast";
 
 interface DocumentItem {
   id: string;
@@ -31,6 +41,27 @@ interface DocumentInventoryProps {
   onUploadClick?: () => void;
 }
 
+const PAGE_SIZE = 5;
+
+const getPageNumbers = (
+  current: number,
+  total: number
+): (number | "ellipsis-start" | "ellipsis-end")[] => {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  if (current <= 4) {
+    return [1, 2, 3, 4, 5, "ellipsis-end", total];
+  }
+
+  if (current >= total - 3) {
+    return [1, "ellipsis-start", total - 4, total - 3, total - 2, total - 1, total];
+  }
+
+  return [1, "ellipsis-start", current - 1, current, current + 1, "ellipsis-end", total];
+};
+
 export function DocumentInventory({
   documents,
   onInspectDoc,
@@ -39,15 +70,21 @@ export function DocumentInventory({
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [mimeFilter, setMimeFilter] = useState("ALL");
+  const [currentPage, setCurrentPage] = useState(1);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
   const handleCopyHash = (hash: string) => {
     navigator.clipboard.writeText(hash);
     setCopiedHash(hash);
+    toast({
+      title: "Copied",
+      description: "SHA-256 copied to clipboard.",
+      variant: "success",
+    });
     setTimeout(() => setCopiedHash(null), 2000);
   };
 
-  // Filtered documents
+  // Filtered documents: search & filter applied FIRST
   const filtered = documents.filter((doc) => {
     const matchesSearch =
       doc.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -61,6 +98,36 @@ export function DocumentInventory({
 
     return matchesSearch && matchesStatus && matchesMime;
   });
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+
+  // When search or either filter changes, automatically reset to page 1
+  const handleSearchChange = (val: string) => {
+    setSearch(val);
+    setCurrentPage(1);
+  };
+
+  const handleStatusFilterChange = (val: string) => {
+    setStatusFilter(val);
+    setCurrentPage(1);
+  };
+
+  const handleMimeFilterChange = (val: string) => {
+    setMimeFilter(val);
+    setCurrentPage(1);
+  };
+
+  // If the active page becomes invalid after filtering, automatically move to the last valid page
+  useEffect(() => {
+    if (totalPages > 0 && currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
+  // Paginate filtered results
+  const safeCurrentPage = totalPages > 0 ? Math.min(Math.max(1, currentPage), totalPages) : 1;
+  const startIndex = (safeCurrentPage - 1) * PAGE_SIZE;
+  const paginatedDocuments = filtered.slice(startIndex, startIndex + PAGE_SIZE);
 
   return (
     <Card className="p-5 bg-card border-border shadow-xs space-y-4">
@@ -87,7 +154,7 @@ export function DocumentInventory({
             <Input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               placeholder="Search filename or SHA..."
               className="pl-8 h-8 text-xs bg-background"
             />
@@ -95,7 +162,7 @@ export function DocumentInventory({
 
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => handleStatusFilterChange(e.target.value)}
             className="h-8 bg-background border border-input rounded-md px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
             aria-label="Filter documents by status"
           >
@@ -107,7 +174,7 @@ export function DocumentInventory({
 
           <select
             value={mimeFilter}
-            onChange={(e) => setMimeFilter(e.target.value)}
+            onChange={(e) => handleMimeFilterChange(e.target.value)}
             className="h-8 bg-background border border-input rounded-md px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
             aria-label="Filter documents by MIME type"
           >
@@ -150,7 +217,7 @@ export function DocumentInventory({
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((doc) => {
+              paginatedDocuments.map((doc) => {
                 const formattedDate = new Date(doc.createdAt).toLocaleDateString(undefined, {
                   month: "short",
                   day: "numeric",
@@ -247,6 +314,61 @@ export function DocumentInventory({
           </TableBody>
         </Table>
       </div>
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="pt-2 flex flex-col items-center gap-2">
+          <Pagination className="flex justify-center">
+            <PaginationContent className="flex-wrap justify-center gap-1">
+              <PaginationItem>
+                <PaginationPrevious
+                  onClick={() => {
+                    if (safeCurrentPage > 1) {
+                      setCurrentPage(safeCurrentPage - 1);
+                    }
+                  }}
+                  disabled={safeCurrentPage <= 1}
+                  className="h-8 text-xs font-mono"
+                />
+              </PaginationItem>
+
+              {getPageNumbers(safeCurrentPage, totalPages).map((item) =>
+                item === "ellipsis-start" || item === "ellipsis-end" ? (
+                  <PaginationItem key={item}>
+                    <PaginationEllipsis className="h-8 w-8" />
+                  </PaginationItem>
+                ) : (
+                  <PaginationItem key={item}>
+                    <PaginationLink
+                      isActive={item === safeCurrentPage}
+                      onClick={() => setCurrentPage(item)}
+                      className="h-8 w-8 text-xs cursor-pointer font-mono"
+                    >
+                      {item}
+                    </PaginationLink>
+                  </PaginationItem>
+                )
+              )}
+
+              <PaginationItem>
+                <PaginationNext
+                  onClick={() => {
+                    if (safeCurrentPage < totalPages) {
+                      setCurrentPage(safeCurrentPage + 1);
+                    }
+                  }}
+                  disabled={safeCurrentPage >= totalPages}
+                  className="h-8 text-xs font-mono"
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+
+          <p className="text-[11px] text-muted-foreground font-mono text-center">
+            Showing {startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, filtered.length)} of {filtered.length} documents
+          </p>
+        </div>
+      )}
     </Card>
   );
 }

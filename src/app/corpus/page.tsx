@@ -10,6 +10,7 @@ import { CorpusCharts } from "@/components/corpus/corpus-charts";
 import { CorpusActivityFeed } from "@/components/corpus/corpus-activity-feed";
 import { ChunkDrawer } from "@/components/corpus/chunk-drawer";
 import { CorpusEmptyState } from "@/components/corpus/corpus-empty-state";
+import { toast } from "@/components/ui/use-toast";
 
 export default function CorpusPage() {
   const [documents, setDocuments] = useState<any[]>([]);
@@ -82,12 +83,24 @@ export default function CorpusPage() {
 
       if (res.ok) {
         await fetchCorpusData();
+        toast({
+          title: "Upload Successful",
+          description: "Document uploaded successfully.",
+          variant: "success",
+        });
       } else {
-        const err = await res.json();
-        alert(`Upload error: ${err.error || "Failed to ingest document"}`);
+        toast({
+          title: "Upload Failed",
+          description: "Failed to upload document. Please try again.",
+          variant: "destructive",
+        });
       }
     } catch (err: any) {
-      alert(`Upload failed: ${err.message}`);
+      toast({
+        title: "Upload Failed",
+        description: "Failed to upload document. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setUploading(false);
       if (e.target) {

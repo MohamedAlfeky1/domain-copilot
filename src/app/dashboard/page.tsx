@@ -13,6 +13,7 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
+import { toast } from "@/components/ui/use-toast";
 
 export default function DashboardPage() {
   const [documents, setDocuments] = useState<any[]>([]);
@@ -48,12 +49,21 @@ export default function DashboardPage() {
     try {
       const res = await fetch(`/api/documents/${doc.id}/reingest`, { method: "POST" });
       if (!res.ok) {
-        const body = await res.json();
+        const body = await res.json().catch(() => ({}));
         throw new Error(body.error || "Retry failed");
       }
       await fetchCorpus();
+      toast({
+        title: "Pipeline Retried",
+        description: "Processing pipeline retried successfully.",
+        variant: "success",
+      });
     } catch (error: any) {
-      alert(`Retry error: ${error.message}`);
+      toast({
+        title: "Retry Failed",
+        description: "Failed to retry document processing.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -73,12 +83,24 @@ export default function DashboardPage() {
 
       if (res.ok) {
         await fetchCorpus();
+        toast({
+          title: "Upload Successful",
+          description: "Document uploaded successfully.",
+          variant: "success",
+        });
       } else {
-        const err = await res.json();
-        alert(`Upload error: ${err.error}`);
+        toast({
+          title: "Upload Failed",
+          description: "Failed to upload document. Please try again.",
+          variant: "destructive",
+        });
       }
     } catch (err: any) {
-      alert(`Upload failed: ${err.message}`);
+      toast({
+        title: "Upload Failed",
+        description: "Failed to upload document. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setUploading(false);
     }
