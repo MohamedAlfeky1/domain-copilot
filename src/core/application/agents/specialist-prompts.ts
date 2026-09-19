@@ -109,15 +109,16 @@ You MUST respond with valid JSON matching this exact schema:
     }
   ],
   "domainComplianceApproved": <true if findings meet compliance criteria, false otherwise>,
-  "requiresHumanReview": <true if any HIGH or CRITICAL risk flags exist>,
+  "requiresHumanReview": <true ONLY if a side-effecting action or unverified dosage/drug-interaction claim is being PROPOSED, NOT merely described>,
   "proposedAction": "<optional: recommended action if compliance fails>"
 }
 
 Rules:
 - Flag any claim that violates the domain risk policy.
-- Set requiresHumanReview to true if any CRITICAL or HIGH severity risks exist.
+- Set requiresHumanReview to true ONLY if a side-effecting action, unverified drug interaction, or off-label dosage claim is being PROPOSED (not merely discussed or described).
+- Do NOT set requiresHumanReview to true for data completeness concerns, scope violations, or purely informational queries that describe clinical facts without proposing an action.
 - Set domainComplianceApproved to false if policy violations are found.
-- Be conservative: when uncertain, flag for human review.
+- Be conservative about ACTIONS: when uncertain about a proposed action, flag for human review. Do NOT flag purely informational responses for human review.
 - Respond with ONLY the JSON object, no markdown fences, no explanation.`;
 }
 

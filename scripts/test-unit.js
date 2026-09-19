@@ -372,6 +372,121 @@ async function runUnitTests() {
     assert.strictEqual(resolveTimeout("openai", { STEP_TIMEOUT_MS: "25000" }), 25000);
   });
 
+  // 23. HITL Qualification: isConsequentialHITLRequired logic
+  function isConsequentialHITLRequired(auditorOutput, twistResult) {
+    if (!twistResult.isPermitted) return true;
+    if (!auditorOutput.requiresHumanReview) return false;
+    const INFORMATIONAL_PATTERNS = [
+      "data completeness",
+      "compliance violation",
+      "scope",
+      "insufficient",
+      "incomplete",
+      "out of scope",
+      "unrelated",
+      "outside the scope",
+      "no further action",
+    ];
+    const consequentialFlags = auditorOutput.riskFlags.filter((flag) => {
+      if (flag.severity !== "HIGH" && flag.severity !== "CRITICAL") return false;
+      const riskLower = (flag.riskType + " " + flag.detail).toLowerCase();
+      return !INFORMATIONAL_PATTERNS.some((p) => riskLower.includes(p));
+    });
+    return consequentialFlags.length > 0;
+  }
+
+  await test("isConsequentialHITLRequired returns true when Twist Guard is tripped", () => {
+    const auditor = { requiresHumanReview: false, riskFlags: [] };
+    const twist = { isPermitted: false, computedRiskIndex: 0.9, threshold: 0.85, violations: ["low evidence"] };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), true);
+  });
+
+  await test("isConsequentialHITLRequired returns false for informational data-completeness flag", () => {
+    const auditor = {
+      requiresHumanReview: true,
+      riskFlags: [
+        { riskType: "Data Completeness", severity: "CRITICAL", detail: "The data completeness is marked as INSUFFICIENT" },
+      ],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false);
+  });
+
+  await test("isConsequentialHITLRequired returns false for compliance-violation / out-of-scope flag", () => {
+    const auditor = {
+      requiresHumanReview: true,
+      riskFlags: [
+        { riskType: "Compliance Violation", severity: "CRITICAL", detail: "The query is unrelated to the domain" },
+      ],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false);
+  });
+
+  await test("isConsequentialHITLRequired returns true for consequential contraindication action", () => {
+    const auditor = {
+      requiresHumanReview: true,
+      riskFlags: [
+        { riskType: "Contraindication", severity: "CRITICAL", detail: "Concurrent administration of MAOIs is strictly contraindicated" },
+      ],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), true);
+  });
+
+  await test("isConsequentialHITLRequired returns true for dosage violation action", () => {
+    const auditor = {
+      requiresHumanReview: true,
+      riskFlags: [
+        { riskType: "Dosage Violation", severity: "HIGH", detail: "Proposed dosage exceeds therapeutic ceiling by 200%" },
+      ],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), true);
+  });
+
+  await test("isConsequentialHITLRequired returns false when auditor.requiresHumanReview is false", () => {
+    const auditor = {
+      requiresHumanReview: false,
+      riskFlags: [
+        { riskType: "Contraindication", severity: "CRITICAL", detail: "Drug interaction detected" },
+      ],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false);
+  });
+
+  await test("isConsequentialHITLRequired filters mixed informational + consequential flags correctly", () => {
+    const auditor = {
+      requiresHumanReview: true,
+      riskFlags: [
+        { riskType: "Data Completeness", severity: "CRITICAL", detail: "Marked as insufficient" },
+        { riskType: "Off-Label Claim", severity: "HIGH", detail: "Unverified off-label usage proposed" },
+      ],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), true, "Must trigger when at least one consequential flag exists");
+  });
+
+  await test("isConsequentialHITLRequired ignores LOW/MEDIUM severity even for consequential types", () => {
+    const auditor = {
+      requiresHumanReview: true,
+      riskFlags: [
+        { riskType: "Contraindication", severity: "LOW", detail: "Minor interaction noted" },
+        { riskType: "Data Completeness", severity: "CRITICAL", detail: "Insufficient data" },
+      ],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false, "LOW severity contraindication should not trigger HITL");
+  });
+
+  await test("Auditor prompt instructs to distinguish informational from action risk", () => {
+    const fs = require("fs");
+    const promptSrc = fs.readFileSync(require("path").join(__dirname, "../src/core/application/agents/specialist-prompts.ts"), "utf-8");
+    assert.ok(promptSrc.includes("ONLY if a side-effecting action"), "Prompt must guide auditor to flag only side-effecting actions");
+    assert.ok(promptSrc.includes("Do NOT set requiresHumanReview to true for data completeness"), "Prompt must explicitly exclude data completeness from HITL");
+  });
+
   console.log("--------------------------------------------------");
   console.log(`Unit Test Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("==================================================");

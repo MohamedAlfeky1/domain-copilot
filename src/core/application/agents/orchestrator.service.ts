@@ -142,6 +142,48 @@ export class MultiAgentOrchestrator {
   }
 
   /**
+   * Determines if the auditor output warrants HITL pause.
+   * HITL is for side-effecting / consequential operations (HITL-001 spec),
+   * NOT for informational data-quality or scope concerns.
+   *
+   * Returns true when at least one of:
+   *  1. Twist Guard tripped (deterministic safety floor)
+   *  2. Auditor flagged review AND at least one risk flag is genuinely
+   *     consequential (not merely data-completeness / scope / informational)
+   */
+  private isConsequentialHITLRequired(
+    auditorOutput: AuditorOutput,
+    twistResult: TwistEvaluationResult
+  ): boolean {
+    // 1. Twist Guard tripped -> always HITL
+    if (!twistResult.isPermitted) return true;
+
+    // 2. If auditor didn't flag for review, no HITL
+    if (!auditorOutput.requiresHumanReview) return false;
+
+    // 3. Filter out informational / data-quality risk types
+    const INFORMATIONAL_PATTERNS = [
+      "data completeness",
+      "compliance violation",
+      "scope",
+      "insufficient",
+      "incomplete",
+      "out of scope",
+      "unrelated",
+      "outside the scope",
+      "no further action",
+    ];
+
+    const consequentialFlags = auditorOutput.riskFlags.filter((flag) => {
+      if (flag.severity !== "HIGH" && flag.severity !== "CRITICAL") return false;
+      const riskLower = (flag.riskType + " " + flag.detail).toLowerCase();
+      return !INFORMATIONAL_PATTERNS.some((p) => riskLower.includes(p));
+    });
+
+    return consequentialFlags.length > 0;
+  }
+
+  /**
    * Execute a single agent step with tool-calling loop.
    * Bounded by MAX_ITERATIONS to prevent infinite loops.
    * Each iteration enforced by stepTimeoutMs.
@@ -615,9 +657,11 @@ export class MultiAgentOrchestrator {
       }
 
       // ═══════════════════════════════════════════════════════════════
-      // HITL-001/002: If auditor requires human review, CREATE approval and PAUSE
+      // HITL-001/002: If auditor flags a genuinely consequential risk, CREATE approval and PAUSE
+      // Informational data-quality / scope flags are passed to the Drafter instead.
       // ═══════════════════════════════════════════════════════════════
-      if (auditorOutput.requiresHumanReview) {
+      const hitlRequired = this.isConsequentialHITLRequired(auditorOutput, twistResult);
+      if (hitlRequired) {
         // Create HITL approval gate step
         const gateStep = await this.createStep(runId, ++stepIndex, "HITL Approval Gate", "APPROVAL_GATE", emitEvent, {
           riskFlags: auditorOutput.riskFlags,
