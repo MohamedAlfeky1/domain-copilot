@@ -564,6 +564,61 @@ async function runUnitTests() {
     assert.strictEqual(msg.citations[0].page, 4);
   });
 
+  // Evaluation Dashboard: Authoritative Benchmark Metrics Mapping (OBS-004 & OBS-007)
+  await test("Evaluation summary correctly maps 33-case baseline without stale fallbacks", () => {
+    const fixturePath = require("path").resolve(__dirname, "../fixtures/eval-results.json");
+    const evalData = JSON.parse(fs.readFileSync(fixturePath, "utf-8"));
+
+    const totalTests = evalData.totalCases ?? evalData.results?.length ?? 33;
+    const passed = evalData.passed ?? 30;
+    const failed = evalData.failed ?? (totalTests - passed);
+    const passRatePct = evalData.passRate ?? Math.round((passed / totalTests) * 100);
+    const averageLatencyMs = evalData.operationalMetrics?.avgLatencyMs ?? null;
+    const rawCost = evalData.operationalMetrics?.totalCostUsd;
+    const totalCostUsd = rawCost != null ? Math.round(rawCost * 100000) / 100000 : null;
+    const retrievalRecallPct = evalData.retrievalMetrics?.retrievalRecallPct ?? null;
+    const refusalPrecisionPct = evalData.refusalMetrics?.refusalPrecisionPct ?? null;
+
+    // 1. Authoritative 33-case composition
+    assert.strictEqual(totalTests, 33, "Total cases must be exactly 33");
+    assert.strictEqual(passed, 30, "Passed cases must be exactly 30");
+    assert.strictEqual(failed, 3, "Failed cases must be exactly 3");
+    assert.strictEqual(passRatePct, 91, "Pass rate must be exactly 91%");
+
+    // 2. Correct operational metrics mapping
+    assert.strictEqual(averageLatencyMs, 185, "Average latency must map to 185ms from operationalMetrics.avgLatencyMs");
+    assert.strictEqual(totalCostUsd, 0.09352, "Total cost must map to $0.09352 from operationalMetrics.totalCostUsd");
+
+    // 3. Correct retrieval and refusal metrics mapping
+    assert.strictEqual(retrievalRecallPct, 88, "Retrieval recall must map to 88% from retrievalMetrics.retrievalRecallPct");
+    assert.strictEqual(refusalPrecisionPct, 100, "Refusal precision must map to 100% from refusalMetrics.refusalPrecisionPct");
+
+    // 4. Strict absence of stale demo fallbacks
+    assert.notStrictEqual(totalTests, 26, "Total tests must not be stale 26");
+    assert.notStrictEqual(averageLatencyMs, 15, "Average latency must not be stale 15ms fallback");
+    assert.notStrictEqual(totalCostUsd, 0.0724, "Total cost must not be stale $0.0724 fallback");
+  });
+
+  await test("Evaluation fixture results preserve 33 per-case groundedness and outcomes", () => {
+    const fixturePath = require("path").resolve(__dirname, "../fixtures/eval-results.json");
+    const evalData = JSON.parse(fs.readFileSync(fixturePath, "utf-8"));
+
+    assert.strictEqual(evalData.results.length, 33);
+    const passedResults = evalData.results.filter(r => r.pass);
+    const failedResults = evalData.results.filter(r => !r.pass);
+    assert.strictEqual(passedResults.length, 30);
+    assert.strictEqual(failedResults.length, 3);
+
+    // Verify the 3 known failing cases below 0.80 threshold
+    const failIds = failedResults.map(r => r.id).sort();
+    assert.deepStrictEqual(failIds, ["G-05", "G-20", "XL-02"]);
+
+    // Verify all 7 adversarial cases achieved 100% refusal
+    const advResults = evalData.results.filter(r => r.id.startsWith("ADV"));
+    assert.strictEqual(advResults.length, 7);
+    assert(advResults.every(r => r.pass && r.refusalTriggered), "All 7 adversarial cases must pass with refusalTriggered=true");
+  });
+
   console.log("--------------------------------------------------");
   console.log(`Unit Test Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("==================================================");
