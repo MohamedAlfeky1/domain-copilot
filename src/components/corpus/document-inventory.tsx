@@ -22,6 +22,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { toast } from "@/components/ui/use-toast";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface DocumentItem {
   id: string;
@@ -39,6 +40,7 @@ interface DocumentInventoryProps {
   documents: DocumentItem[];
   onInspectDoc: (doc: DocumentItem) => void;
   onUploadClick?: () => void;
+  loading?: boolean;
 }
 
 const PAGE_SIZE = 5;
@@ -66,6 +68,7 @@ export function DocumentInventory({
   documents,
   onInspectDoc,
   onUploadClick,
+  loading = false,
 }: DocumentInventoryProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -79,7 +82,6 @@ export function DocumentInventory({
     toast({
       title: "Copied",
       description: "SHA-256 copied to clipboard.",
-      variant: "success",
     });
     setTimeout(() => setCopiedHash(null), 2000);
   };
@@ -138,9 +140,13 @@ export function DocumentInventory({
             <h2 className="text-sm font-bold text-foreground font-mono uppercase tracking-wider">
               Document Catalog &amp; Chunk Inventory
             </h2>
-            <Badge variant="secondary" className="font-mono text-[10px]">
-              {documents.length} ITEMS
-            </Badge>
+            {loading ? (
+              <Skeleton className="h-4 w-14 rounded" />
+            ) : (
+              <Badge variant="secondary" className="font-mono text-[10px]">
+                {documents.length} ITEMS
+              </Badge>
+            )}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
             Cryptographically verified clinical guidelines and operational protocol files stored in active pgvector partition.
@@ -201,7 +207,51 @@ export function DocumentInventory({
             </TableRow>
           </TableHeader>
           <TableBody className="text-xs font-mono">
-            {filtered.length === 0 ? (
+            {loading ? (
+              Array.from({ length: 5 }).map((_, idx) => (
+                <TableRow key={`skeleton-row-${idx}`} className="hover:bg-muted/30">
+                  {/* Title */}
+                  <TableCell className="py-3 px-4 font-sans font-medium text-foreground">
+                    <div className="flex items-center gap-2">
+                      <Skeleton className="w-4 h-4 rounded shrink-0" />
+                      <Skeleton className="h-4 w-52" />
+                    </div>
+                  </TableCell>
+
+                  {/* Type */}
+                  <TableCell className="py-3 px-4">
+                    <Skeleton className="h-4 w-12 rounded" />
+                  </TableCell>
+
+                  {/* Size */}
+                  <TableCell className="py-3 px-4">
+                    <Skeleton className="h-4 w-16" />
+                  </TableCell>
+
+                  {/* Content Hash */}
+                  <TableCell className="py-3 px-4">
+                    <Skeleton className="h-4 w-28" />
+                  </TableCell>
+
+                  {/* Status */}
+                  <TableCell className="py-3 px-4">
+                    <Skeleton className="h-5 w-20 rounded-md" />
+                  </TableCell>
+
+                  {/* Date */}
+                  <TableCell className="py-3 px-4">
+                    <Skeleton className="h-4 w-24" />
+                  </TableCell>
+
+                  {/* Actions */}
+                  <TableCell className="py-3 px-4 text-right">
+                    <div className="flex justify-end">
+                      <Skeleton className="h-7 w-28 rounded-md" />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : filtered.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center py-10 text-muted-foreground font-sans">
                   {documents.length === 0 ? (
@@ -316,7 +366,7 @@ export function DocumentInventory({
       </div>
 
       {/* Pagination Controls */}
-      {totalPages > 1 && (
+      {!loading && totalPages > 1 && (
         <div className="pt-2 flex flex-col items-center gap-2">
           <Pagination className="flex justify-center">
             <PaginationContent className="flex-wrap justify-center gap-1">
