@@ -272,30 +272,100 @@ async function runUnitTests() {
     assert.strictEqual(canAccessRun(viewerUser, run, approval), false);
   });
 
-  // 20. Presentation Normalization: normalizeDisplayText
+  // 20. Presentation Normalization: normalizeDisplayText & getSafeStreamDisplayText
   function normalizeDisplayText(raw) {
     if (typeof raw !== "string") {
-      if (raw && typeof raw === "object" && "synthesis" in raw && typeof raw.synthesis === "string") {
-        return raw.synthesis;
+      if (raw && typeof raw === "object") {
+        if ("refusalNotice" in raw && typeof raw.refusalNotice === "string" && raw.refusalNotice.trim()) {
+          return raw.refusalNotice;
+        }
+        if ("synthesis" in raw && typeof raw.synthesis === "string") {
+          return raw.synthesis;
+        }
       }
       return raw ? String(raw) : "";
     }
-    const trimmed = raw.trim();
+    let trimmed = raw.trim();
     if (!trimmed) return "";
-    if (trimmed.startsWith("{") && trimmed.includes('"synthesis"')) {
+    if (trimmed.startsWith("```json")) {
+      trimmed = trimmed.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+    } else if (trimmed.startsWith("```")) {
+      trimmed = trimmed.replace(/^```\s*/, "").replace(/```$/, "").trim();
+    }
+    if (trimmed.startsWith("{") && (trimmed.includes('"synthesis"') || trimmed.includes('"refusalNotice"'))) {
       try {
         const parsed = JSON.parse(trimmed);
-        if (parsed && typeof parsed.synthesis === "string") {
-          return parsed.synthesis;
+        if (parsed) {
+          if (typeof parsed.refusalNotice === "string" && parsed.refusalNotice.trim().length > 0) {
+            return parsed.refusalNotice;
+          }
+          if (typeof parsed.synthesis === "string") {
+            return parsed.synthesis;
+          }
         }
       } catch {
+        const refusalMatch = trimmed.match(/"refusalNotice"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if (refusalMatch && refusalMatch[1].trim().length > 0) {
+          try {
+            return JSON.parse(`"${refusalMatch[1]}"`);
+          } catch {
+            return refusalMatch[1];
+          }
+        }
         const match = trimmed.match(/"synthesis"\s*:\s*"((?:[^"\\]|\\.)*)"/);
         if (match) {
           try {
             return JSON.parse(`"${match[1]}"`);
-          } catch {}
+          } catch {
+            return match[1];
+          }
         }
       }
+    }
+    return raw;
+  }
+
+  function getSafeStreamDisplayText(raw) {
+    if (!raw) return "";
+    let trimmed = raw.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith("```json")) {
+      trimmed = trimmed.replace(/^```json\s*/i, "").trim();
+    }
+    if (trimmed.startsWith("{") || trimmed.includes('"synthesis"') || trimmed.includes('"refusalNotice"')) {
+      if (
+        trimmed.includes('"refusalNotice"') ||
+        /unrelated|cannot be provided|no synthesis|out of scope|insufficient evidence/i.test(trimmed)
+      ) {
+        return "";
+      }
+      const synthesisKeyIdx = trimmed.indexOf('"synthesis"');
+      if (synthesisKeyIdx === -1) return "";
+      const colonIdx = trimmed.indexOf(":", synthesisKeyIdx);
+      if (colonIdx === -1) return "";
+      const quoteIdx = trimmed.indexOf('"', colonIdx);
+      if (quoteIdx === -1) return "";
+      const afterQuote = trimmed.slice(quoteIdx + 1);
+      let endIdx = -1;
+      for (let i = 0; i < afterQuote.length; i++) {
+        if (afterQuote[i] === '"' && (i === 0 || afterQuote[i - 1] !== "\\")) {
+          endIdx = i;
+          break;
+        }
+      }
+      let extracted = endIdx === -1 ? afterQuote : afterQuote.slice(0, endIdx);
+      try {
+        extracted = JSON.parse(`"${extracted.replace(/\\"/g, '"').replace(/"/g, '\\"')}"`);
+      } catch {
+        extracted = extracted.replace(/\\n/g, "\n").replace(/\\"/g, '"');
+      }
+      if (endIdx === -1 && extracted.length < 80) {
+        return "";
+      }
+      if (/unrelated|cannot be provided|no synthesis|out of scope|insufficient evidence|not contain|not mentioned/i.test(extracted)) {
+        return "";
+      }
+      return extracted;
     }
     return raw;
   }
@@ -345,6 +415,29 @@ async function runUnitTests() {
     assert.strictEqual(normalizeDisplayText(null), "");
     assert.strictEqual(normalizeDisplayText(undefined), "");
     assert.strictEqual(normalizeDisplayText(123), "123");
+  });
+
+  await test("getSafeStreamDisplayText hides raw JSON during refusal in progress", () => {
+    const streamingRefusal = '{\n  "synthesis": "The query about the winner of the FIFA World Cup is unrelated",\n  "citationsUsed": [],\n  "refusalNotice": "The query is unrelated"';
+    assert.strictEqual(getSafeStreamDisplayText(streamingRefusal), "", "Refusal in progress must return empty string during streaming");
+  });
+
+  await test("getSafeStreamDisplayText hides JSON preamble before synthesis", () => {
+    const preamble = '{\n  "status": "pending",\n  ';
+    assert.strictEqual(getSafeStreamDisplayText(preamble), "", "JSON preamble must never leak raw JSON syntax");
+  });
+
+  await test("getSafeStreamDisplayText streams clean synthesis from incomplete JSON", () => {
+    const incompleteGrounded = '{\n  "synthesis": "For acute myocardial infarction, initiate aspirin loading dose immediately upon presentation with 300mg chewable tablets';
+    assert.strictEqual(
+      getSafeStreamDisplayText(incompleteGrounded),
+      "For acute myocardial infarction, initiate aspirin loading dose immediately upon presentation with 300mg chewable tablets"
+    );
+  });
+
+  await test("getSafeStreamDisplayText returns plain text unchanged", () => {
+    const plain = "Direct synthesis text stream";
+    assert.strictEqual(getSafeStreamDisplayText(plain), plain);
   });
 
   await test("done event contract includes clean finalAnswer", () => {

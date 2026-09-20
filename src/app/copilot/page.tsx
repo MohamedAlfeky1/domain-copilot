@@ -50,37 +50,138 @@ interface ApprovalInfo {
 /**
  * Presentation normalization helper.
  * If the value is already plain text, returns it unchanged.
- * If the value is a JSON string or object containing { "synthesis": "..." },
- * extracts and returns only the synthesis text.
- * If parsing fails, returns the original text.
+ * If the value is a JSON string or object containing { "synthesis": "..." } or { "refusalNotice": "..." },
+ * extracts and returns only the human-readable text.
+ * If parsing fails or value is not plain text, returns a safe fallback.
  */
 function normalizeDisplayText(raw: unknown): string {
   if (typeof raw !== "string") {
-    if (raw && typeof raw === "object" && "synthesis" in (raw as any) && typeof (raw as any).synthesis === "string") {
-      return (raw as any).synthesis;
+    if (raw && typeof raw === "object") {
+      if ("refusalNotice" in (raw as any) && typeof (raw as any).refusalNotice === "string" && (raw as any).refusalNotice.trim()) {
+        return (raw as any).refusalNotice;
+      }
+      if ("synthesis" in (raw as any) && typeof (raw as any).synthesis === "string") {
+        return (raw as any).synthesis;
+      }
     }
     return raw ? String(raw) : "";
   }
 
-  const trimmed = raw.trim();
+  let trimmed = raw.trim();
   if (!trimmed) return "";
 
-  if (trimmed.startsWith("{") && trimmed.includes('"synthesis"')) {
+  // Strip markdown code block wrapper if present
+  if (trimmed.startsWith("```json")) {
+    trimmed = trimmed.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+  } else if (trimmed.startsWith("```")) {
+    trimmed = trimmed.replace(/^```\s*/, "").replace(/```$/, "").trim();
+  }
+
+  if (trimmed.startsWith("{") && (trimmed.includes('"synthesis"') || trimmed.includes('"refusalNotice"'))) {
     try {
       const parsed = JSON.parse(trimmed);
-      if (parsed && typeof parsed.synthesis === "string") {
-        return parsed.synthesis;
+      if (parsed) {
+        if (typeof parsed.refusalNotice === "string" && parsed.refusalNotice.trim().length > 0) {
+          return parsed.refusalNotice;
+        }
+        if (typeof parsed.synthesis === "string") {
+          return parsed.synthesis;
+        }
       }
     } catch {
+      // Regex extraction fallback for malformed JSON
+      const refusalMatch = trimmed.match(/"refusalNotice"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      if (refusalMatch && refusalMatch[1].trim().length > 0) {
+        try {
+          return JSON.parse(`"${refusalMatch[1]}"`);
+        } catch {
+          return refusalMatch[1];
+        }
+      }
       const match = trimmed.match(/"synthesis"\s*:\s*"((?:[^"\\]|\\.)*)"/);
       if (match) {
         try {
           return JSON.parse(`"${match[1]}"`);
-        } catch {}
+        } catch {
+          return match[1];
+        }
       }
     }
   }
 
+  return raw;
+}
+
+/**
+ * Safely extracts human-readable text during live streaming.
+ * If the streamed text is raw JSON / agent contract output:
+ * - If it represents a refusal in progress, returns "" (progress UI only).
+ * - If it represents a normal synthesis in progress, extracts and streams only the synthesis text.
+ * - If the JSON structure is incomplete before the synthesis field, returns "" (never leaks raw JSON).
+ * - If it is plain text, returns it directly.
+ */
+function getSafeStreamDisplayText(raw: string): string {
+  if (!raw) return "";
+  let trimmed = raw.trim();
+  if (!trimmed) return "";
+
+  // Check if content represents structured JSON / agent output
+  if (trimmed.startsWith("```json")) {
+    trimmed = trimmed.replace(/^```json\s*/i, "").trim();
+  }
+
+  if (trimmed.startsWith("{") || trimmed.includes('"synthesis"') || trimmed.includes('"refusalNotice"')) {
+    // If it contains refusal markers or out-of-scope indications, hide it completely during streaming
+    if (
+      trimmed.includes('"refusalNotice"') ||
+      /unrelated|cannot be provided|no synthesis|out of scope|insufficient evidence/i.test(trimmed)
+    ) {
+      return "";
+    }
+
+    // Attempt to extract streaming synthesis text (even if JSON is incomplete)
+    const synthesisKeyIdx = trimmed.indexOf('"synthesis"');
+    if (synthesisKeyIdx === -1) {
+      // Still in JSON preamble before "synthesis" - hide raw JSON
+      return "";
+    }
+
+    const colonIdx = trimmed.indexOf(":", synthesisKeyIdx);
+    if (colonIdx === -1) return "";
+
+    const quoteIdx = trimmed.indexOf('"', colonIdx);
+    if (quoteIdx === -1) return "";
+
+    const afterQuote = trimmed.slice(quoteIdx + 1);
+    let endIdx = -1;
+    for (let i = 0; i < afterQuote.length; i++) {
+      if (afterQuote[i] === '"' && (i === 0 || afterQuote[i - 1] !== "\\")) {
+        endIdx = i;
+        break;
+      }
+    }
+
+    let extracted = endIdx === -1 ? afterQuote : afterQuote.slice(0, endIdx);
+    try {
+      extracted = JSON.parse(`"${extracted.replace(/\\"/g, '"').replace(/"/g, '\\"')}"`);
+    } catch {
+      extracted = extracted.replace(/\\n/g, "\n").replace(/\\"/g, '"');
+    }
+
+    // If still in initial preamble (< 80 chars) and unclosed, buffer briefly to verify it's not a refusal
+    if (endIdx === -1 && extracted.length < 80) {
+      return "";
+    }
+
+    // Check again if the extracted synthesis text itself indicates refusal
+    if (/unrelated|cannot be provided|no synthesis|out of scope|insufficient evidence|not contain|not mentioned/i.test(extracted)) {
+      return "";
+    }
+
+    return extracted;
+  }
+
+  // Not JSON: plain text stream
   return raw;
 }
 
@@ -376,7 +477,20 @@ export default function CopilotPage() {
         throw new Error(`Failed to load messages (${res.status})`);
       }
       const data = await res.json();
-      setMessages(data.messages || []);
+      const loadedMessages = data.messages || [];
+      setMessages(loadedMessages);
+
+      const lastMsg = loadedMessages[loadedMessages.length - 1];
+      if (
+        lastMsg &&
+        lastMsg.role === "assistant" &&
+        (lastMsg.metadata?.status === "REFUSED" || lastMsg.metadata?.code === "LOW_EVIDENCE_REFUSAL")
+      ) {
+        setIsRefused(true);
+        setRefusalMessage(lastMsg.content);
+        if (lastMsg.runId) setCurrentRunId(lastMsg.runId);
+        setCurrentStage(getWorkflowStage("", "refusal"));
+      }
     } catch (err: any) {
       setChatError(err.message || "Failed to load chat messages.");
     } finally {
@@ -656,6 +770,8 @@ export default function CopilotPage() {
                 setCurrentStage(getWorkflowStage("", "refusal"));
                 setIsRefused(true);
                 setRefusalMessage(data.message || "Request was refused.");
+                setStreamedText("");
+                setStreamCitations([]);
                 setStreaming(false);
                 setIsAwaitingApproval(false);
                 setPendingApproval(null);
@@ -664,6 +780,8 @@ export default function CopilotPage() {
                 } catch {}
                 if (targetConversationId) {
                   await loadMessages(targetConversationId);
+                  setStreamedText("");
+                  setStreamCitations([]);
                 }
               } else if (eventType === "error") {
                 setCurrentStage(getWorkflowStage("", "error"));
@@ -1230,11 +1348,13 @@ export default function CopilotPage() {
         setStreamCitations((prev) => [...prev, data.data]);
       });
 
-      sse.addEventListener("refusal", (evt: any) => {
+      sse.addEventListener("refusal", async (evt: any) => {
         const data = JSON.parse(evt.data);
         setCurrentStage(getWorkflowStage("", "refusal"));
         setIsRefused(true);
-        setRefusalMessage(data.message);
+        setRefusalMessage(data.message || "Request was refused.");
+        setStreamedText("");
+        setStreamCitations([]);
         setStreaming(false);
         setSteps((prev) =>
           prev.map((s, idx) =>
@@ -1245,6 +1365,13 @@ export default function CopilotPage() {
           localStorage.removeItem("copilot_active_run_id");
         } catch {}
         sse.close();
+
+        // Refresh messages from server to load the cleanly persisted assistant message
+        if (targetConv) {
+          await loadMessages(targetConv.id);
+          setStreamedText("");
+          setStreamCitations([]);
+        }
       });
 
       // TW-005: Handle twist_evaluation event
@@ -1289,11 +1416,18 @@ export default function CopilotPage() {
         if (evt?.data) {
           try {
             const data = JSON.parse(evt.data);
-            const cleanAnswer = data.finalAnswer || data.data?.finalAnswer;
-            if (cleanAnswer) {
-              setStreamedText(normalizeDisplayText(cleanAnswer));
+            if (data.refusal || data.data?.refusal) {
+              setIsRefused(true);
+              setRefusalMessage(data.refusalReason || data.data?.refusalReason || "Request was refused.");
+              setStreamedText("");
+              setStreamCitations([]);
             } else {
-              setStreamedText((prev) => normalizeDisplayText(prev));
+              const cleanAnswer = data.finalAnswer || data.data?.finalAnswer;
+              if (cleanAnswer) {
+                setStreamedText(normalizeDisplayText(cleanAnswer));
+              } else {
+                setStreamedText((prev) => normalizeDisplayText(prev));
+              }
             }
           } catch {
             setStreamedText((prev) => normalizeDisplayText(prev));
@@ -1632,6 +1766,18 @@ export default function CopilotPage() {
                 );
               }
 
+              // Check if assistant message is a refusal
+              const isRefusalMessage =
+                msg.metadata?.status === "REFUSED" ||
+                msg.metadata?.code === "LOW_EVIDENCE_REFUSAL";
+
+              if (isRefusalMessage) {
+                // Suppress redundant top refusal card in message list.
+                // The detailed refusal card with "Request refused: insufficient evidence"
+                // is rendered in the active workflow presentation below.
+                return null;
+              }
+
               // Assistant message
               return (
                 <div key={msg.id} className="flex justify-start">
@@ -1667,7 +1813,7 @@ export default function CopilotPage() {
                     </div>
 
                     <div className="prose prose-slate max-w-none text-xs text-slate-800 leading-relaxed whitespace-pre-wrap" dir="auto">
-                      {msg.content}
+                      {normalizeDisplayText(msg.content)}
                     </div>
 
                     {/* Citations Chip Bar */}
@@ -1696,34 +1842,74 @@ export default function CopilotPage() {
             })
           )}
 
-          {/* Active Live Workflow Card with Dynamic Marker */}
+          {/* Active Live Workflow / Processing State */}
           {(streaming || (isAwaitingApproval && pendingApproval) || isRefused) && (
             <div className="flex justify-start">
-              <div className="w-full max-w-2xl border border-border bg-transparent rounded-md p-4 space-y-3 shadow-none">
-                {/* 1. Dynamic Status Marker with Border Variant */}
-                <Marker variant="border" size="lg" role="status" className="w-full justify-start gap-2">
-                  <MarkerIcon>
-                    <currentStage.icon
-                      className={cn(
-                        "w-3.5 h-3.5 shrink-0",
-                        currentStage.id === "hitl"
-                          ? "text-amber-600"
-                          : currentStage.id === "refusal" || currentStage.id === "error"
-                          ? "text-destructive"
-                          : "text-muted-foreground"
-                      )}
-                      aria-hidden="true"
-                    />
-                  </MarkerIcon>
-                  <MarkerContent className={cn("text-sm font-medium text-foreground", currentStage.shimmer && "shimmer")}>
-                    {currentStage.label}
-                  </MarkerContent>
-                </Marker>
+              {isRefused ? (
+                /* Refusal Card (Unchanged) */
+                <div className="w-full max-w-2xl border border-border bg-transparent rounded-md p-4 space-y-3 shadow-none">
+                  <Marker variant="border" size="lg" role="status" className="w-full justify-start gap-2">
+                    <MarkerIcon>
+                      <currentStage.icon
+                        className="w-3.5 h-3.5 shrink-0 text-destructive"
+                        aria-hidden="true"
+                      />
+                    </MarkerIcon>
+                    <MarkerContent className={cn("text-sm font-medium text-foreground", currentStage.shimmer && "shimmer")}>
+                      {currentStage.label}
+                    </MarkerContent>
+                  </Marker>
 
-                {/* 2. Content Body based on State */}
-                {isRefused ? (
-                  <p className="text-xs text-destructive leading-normal font-sans">{refusalMessage}</p>
-                ) : isAwaitingApproval && pendingApproval ? (
+                  <div className="bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-lg p-3 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700 dark:text-rose-400">
+                        <AppIcons.warning className="w-3.5 h-3.5" />
+                        <span>REFUSED: LOW EVIDENCE</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {currentRunId && (
+                          <Link
+                            href={`/runs/${currentRunId}`}
+                            className="inline-flex items-center gap-1 text-[10px] font-mono text-rose-600 hover:text-rose-800 bg-rose-100/70 hover:bg-rose-100 px-2 py-0.5 rounded transition-colors"
+                            title="Inspect execution trace"
+                          >
+                            <span>View Run</span>
+                            <AppIcons.external className="w-2.5 h-2.5" />
+                          </Link>
+                        )}
+                        <button
+                          onClick={() => handleCopy(refusalMessage, "refusal-card")}
+                          className="text-[10px] text-rose-500 hover:text-rose-800 transition-colors p-1"
+                          title="Copy refusal notice"
+                        >
+                          {copiedMessageId === "refusal-card" ? (
+                            <AppIcons.check className="w-3 h-3 text-emerald-600" />
+                          ) : (
+                            <AppIcons.copy className="w-3 h-3" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-rose-900 dark:text-rose-200 leading-normal font-sans" dir="auto">
+                      {normalizeDisplayText(refusalMessage)}
+                    </p>
+                  </div>
+                </div>
+              ) : isAwaitingApproval && pendingApproval ? (
+                /* HITL Approval Card (Unchanged) */
+                <div className="w-full max-w-2xl border border-border bg-transparent rounded-md p-4 space-y-3 shadow-none">
+                  <Marker variant="border" size="lg" role="status" className="w-full justify-start gap-2">
+                    <MarkerIcon>
+                      <currentStage.icon
+                        className="w-3.5 h-3.5 shrink-0 text-amber-600"
+                        aria-hidden="true"
+                      />
+                    </MarkerIcon>
+                    <MarkerContent className={cn("text-sm font-medium text-foreground", currentStage.shimmer && "shimmer")}>
+                      {currentStage.label}
+                    </MarkerContent>
+                  </Marker>
+
                   <div className="space-y-3">
                     <p className="text-xs text-amber-900 leading-normal font-medium">{pendingApproval.proposedAction}</p>
 
@@ -1804,37 +1990,40 @@ export default function CopilotPage() {
                       </span>
                     </div>
                   </div>
-                ) : (
-                  streamedText && (
-                    <div className="prose prose-slate max-w-none text-xs text-foreground/90 leading-relaxed whitespace-pre-wrap" dir="auto">
-                      {streamedText}
-                      <span className="inline-block w-1.5 h-3.5 bg-primary/60 ml-1 animate-pulse align-middle" />
-                    </div>
-                  )
-                )}
+                </div>
+              ) : (
+                /* Active Processing State: Simple inline status row without border/card/divider */
+                <div className="w-full max-w-2xl py-1 space-y-2">
+                  <Marker variant="default" size="lg" role="status" className="justify-start gap-2">
+                    <MarkerIcon>
+                      <currentStage.icon
+                        className={cn(
+                          "w-3.5 h-3.5 shrink-0",
+                          currentStage.id === "error" ? "text-destructive" : "text-muted-foreground"
+                        )}
+                        aria-hidden="true"
+                      />
+                    </MarkerIcon>
+                    <MarkerContent
+                      dir="auto"
+                      className={cn("text-sm font-medium text-foreground", currentStage.shimmer && "shimmer")}
+                    >
+                      {currentStage.label}
+                    </MarkerContent>
+                  </Marker>
 
-                {/* 3. Incoming Citations (beneath the Marker) */}
-                {streamCitations.length > 0 && (
-                  <div className="pt-2 border-t border-border">
-                    <p className="text-[10px] font-mono text-muted-foreground mb-1.5 font-semibold">
-                      INCOMING CITATIONS ({streamCitations.length}):
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {streamCitations.map((c, i) => (
-                        <button
-                          key={c.citationId || i}
-                          type="button"
-                          onClick={() => setSelectedCitation(c)}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted/50 hover:bg-muted border border-border text-[10px] font-mono text-foreground transition-colors"
-                        >
-                          <span>[{c.documentName}, p.{c.page || 1}]</span>
-                          <AppIcons.external className="w-2 h-2 text-muted-foreground" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+                  {(() => {
+                    const safeText = getSafeStreamDisplayText(streamedText);
+                    if (!safeText) return null;
+                    return (
+                      <div className="prose prose-slate max-w-none text-xs text-foreground/90 leading-relaxed whitespace-pre-wrap pt-1" dir="auto">
+                        {safeText}
+                        <span className="inline-block w-1.5 h-3.5 bg-primary/60 ml-1 animate-pulse align-middle" />
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
           )}
 

@@ -22,7 +22,7 @@ import { HybridRetrievalService, RetrievalResult } from "../retrieval/retrieval.
 import { RetrievalScopeFilter } from "../ports/vector-store.port";
 import { ToolRegistry } from "./tool-registry";
 import { ACTIVE_VARIANT } from "../../../config/variant.config";
-import { Run, RunStep, Citation } from "../../domain/types";
+import { Run, RunStep, Citation, RunStatus } from "../../domain/types";
 import { StepTimeoutError, ValidationError } from "../../domain/errors";
 import { ApprovalService } from "../approvals/approval.service";
 import { ITwistPort, TwistEvaluationResult } from "../ports/twist.port";
@@ -465,13 +465,36 @@ export class MultiAgentOrchestrator {
       createdAt: new Date().toISOString(),
     });
 
-    // Mark Run Completed
+    // Check if Drafter output represents a refusal
+    const isRefusal = Boolean(
+      (drafterOutput.refusalNotice && drafterOutput.refusalNotice.trim().length > 0) ||
+      (drafterOutput.citationsUsed.length === 0 && (
+        auditorOutput.riskFlags.some((f) =>
+          f.riskType.toLowerCase().includes("compliance") ||
+          f.detail.toLowerCase().includes("unrelated") ||
+          f.detail.toLowerCase().includes("scope")
+        ) ||
+        /unrelated|cannot be provided|no synthesis|out of scope/i.test(drafterOutput.synthesis)
+      ))
+    );
+
+    const finalStatus: RunStatus = isRefusal ? "REFUSED" : "COMPLETED";
+    const refusalReason = isRefusal
+      ? drafterOutput.refusalNotice || drafterOutput.synthesis
+      : undefined;
+    const finalCitations: Citation[] = isRefusal
+      ? []
+      : drafterOutput.citationsUsed.length > 0
+      ? retrievalCitations.filter((c) => drafterOutput.citationsUsed.includes(c.chunkId))
+      : retrievalCitations;
+
+    // Update Run status
     const finalAnswer = drafterOutput.synthesis;
     const completedRun = await this.db.getRunById(runId);
     if (completedRun) {
-      completedRun.citations = retrievalCitations;
+      completedRun.citations = finalCitations;
     }
-    await this.db.updateRunStatus(runId, "COMPLETED", undefined, finalAnswer);
+    await this.db.updateRunStatus(runId, finalStatus, refusalReason, finalAnswer);
 
     // Persist Assistant Message if part of a conversation
     try {
@@ -492,8 +515,15 @@ export class MultiAgentOrchestrator {
               runId,
               role: "assistant",
               content: finalAnswer,
-              citations: retrievalCitations,
+              citations: finalCitations,
               createdAt: now,
+              metadata: isRefusal
+                ? {
+                    status: "REFUSED",
+                    code: "LOW_EVIDENCE_REFUSAL",
+                    refusalReason,
+                  }
+                : undefined,
             });
             await this.db.updateConversation(conversationId, { updatedAt: now });
           }
@@ -503,20 +533,46 @@ export class MultiAgentOrchestrator {
       console.warn("Notice: Failed to persist assistant message to conversation:", persistErr);
     }
 
+    if (isRefusal) {
+      emitEvent?.({
+        type: "refusal",
+        message: refusalReason,
+      });
+      emitEvent?.({
+        type: "done",
+        finalAnswer,
+        data: {
+          refusal: true,
+          refusalReason,
+          totalTokens,
+          totalCostUsd,
+          citationsCount: 0,
+          finalAnswer,
+        },
+      });
+
+      return {
+        finalAnswer,
+        citations: [],
+        status: "REFUSED",
+        refusalReason,
+      };
+    }
+
     emitEvent?.({
       type: "done",
       finalAnswer,
       data: {
         totalTokens,
         totalCostUsd,
-        citationsCount: retrievalCitations.length,
+        citationsCount: finalCitations.length,
         finalAnswer,
       },
     });
 
     return {
       finalAnswer,
-      citations: retrievalCitations,
+      citations: finalCitations,
       status: "COMPLETED",
     };
   }
@@ -565,6 +621,42 @@ export class MultiAgentOrchestrator {
           retrievalResult.refusalReason ||
           "The available corpus lacks sufficient evidence to reliably answer this question.";
         await this.db.updateRunStatus(runId, "REFUSED", refusalReason, refusalReason);
+
+        // Persist Assistant Refusal Message so it survives conversation reload / history
+        try {
+          const run = await this.db.getRunById(runId);
+          const conversationId = run?.sessionId;
+          if (conversationId) {
+            const conversation = await this.db.getConversationById(conversationId);
+            if (conversation) {
+              const existingMessages = await this.db.listMessagesByConversation(conversationId);
+              const alreadyPersisted = existingMessages.some(
+                (m) => m.runId === runId && m.role === "assistant"
+              );
+              if (!alreadyPersisted) {
+                const now = new Date().toISOString();
+                await this.db.createMessage({
+                  id: `msg-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`,
+                  conversationId,
+                  runId,
+                  role: "assistant",
+                  content: refusalReason,
+                  citations: [],
+                  createdAt: now,
+                  metadata: {
+                    status: "REFUSED",
+                    code: "LOW_EVIDENCE_REFUSAL",
+                    refusalReason,
+                  },
+                });
+                await this.db.updateConversation(conversationId, { updatedAt: now });
+              }
+            }
+          }
+        } catch (persistErr) {
+          console.warn("Notice: Failed to persist refusal message to conversation:", persistErr);
+        }
+
         emitEvent?.({
           type: "refusal",
           message: refusalReason,
@@ -574,6 +666,7 @@ export class MultiAgentOrchestrator {
           data: {
             refusal: true,
             refusalReason,
+            citationsCount: 0,
           },
         });
         return {

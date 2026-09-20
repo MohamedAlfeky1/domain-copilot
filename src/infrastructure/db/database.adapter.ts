@@ -1052,7 +1052,38 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
     }
 
     // 3. High-Fidelity In-Memory Fallback Keyword Engine
-    const queryTokens = queryText.toLowerCase().split(/\W+/).filter((t) => t.length > 2);
+    // Filter out common English and Arabic stop words to prevent false-positive matches (e.g. "the", "who", "من")
+    const STOP_WORDS = new Set([
+      "a", "about", "above", "after", "again", "against", "all", "also", "and", "any",
+      "are", "because", "been", "before", "being", "below", "between", "both",
+      "but", "by", "can", "could", "did", "do", "does", "doing", "down", "during", "each",
+      "few", "for", "from", "further", "had", "has", "have", "having", "he", "her",
+      "here", "hers", "herself", "him", "himself", "his", "how", "i", "if", "in", "into", "is",
+      "it", "its", "itself", "just", "me", "more", "most", "my", "myself", "no", "nor", "not",
+      "now", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours",
+      "ourselves", "out", "over", "own", "same", "she", "should", "so", "some", "such",
+      "than", "that", "the", "their", "theirs", "them", "themselves", "then", "there",
+      "these", "they", "this", "those", "through", "to", "too", "under", "until", "up",
+      "very", "was", "we", "were", "what", "when", "where", "which", "while", "who",
+      "whom", "whose", "why", "will", "with", "won", "would", "you", "your", "yours",
+      "yourself", "yourselves",
+      // Common Arabic functional stop words
+      "من", "إلى", "عن", "على", "في", "حتى", "مع", "هذا", "هذه", "ذلك", "تلك",
+      "التي", "الذي", "الذين", "ما", "ماذا", "هل", "هو", "هي", "هم", "كان", "كانت",
+      "يكون", "أن", "إن", "ثم", "أو", "كم", "كيف", "أين", "متى"
+    ]);
+
+    // Split on whitespace and punctuation, keeping Unicode letters and digits
+    const rawTokens = queryText
+      .toLowerCase()
+      .split(/[\s,.;:!?()[\]{}"'\\/+\-_~`@#$%^&*<>|،؟؛]+/u)
+      .filter((t) => t.length > 2 || (t.length > 1 && /[\u0600-\u06FF]/u.test(t)));
+
+    const queryTokens = rawTokens.filter((t) => !STOP_WORDS.has(t));
+    if (queryTokens.length === 0) {
+      return [];
+    }
+
     const results: KeywordSearchResult[] = [];
 
     for (const chunk of this.chunks.values()) {
