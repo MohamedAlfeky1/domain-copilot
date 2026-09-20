@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import React, { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { AppIcons } from "@/components/ui/icons";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,8 +14,37 @@ const DEMO_ACCOUNTS = [
   { role: "VIEWER", label: "Read-Only Auditor", email: "viewer@domaincopilot.ai", pass: "viewer123", badge: "Read-Only" },
 ];
 
-export default function LoginPage() {
-  const router = useRouter();
+/**
+ * Loading card displayed during session verification and as a Suspense fallback.
+ */
+function LoginLoadingCard({ message = "Verifying session..." }: { message?: string }) {
+  return (
+    <div className="min-h-screen w-full bg-gradient-to-b from-muted/30 via-background to-muted/20 flex flex-col justify-center items-center px-4 py-12 relative overflow-hidden select-none">
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
+      <Card className="w-full max-w-md bg-card border-border shadow-xl backdrop-blur-xl p-8 z-10">
+        <div className="flex flex-col items-center text-center">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground font-mono">
+            DOMAIN COPILOT
+          </h1>
+          <p className="text-xs text-muted-foreground mt-1.5">
+            Clinical Agentic RAG Platform · Secure Access Portal
+          </p>
+          <div className="mt-6 flex items-center gap-2 text-muted-foreground">
+            <AppIcons.loading className="w-4 h-4 animate-spin" />
+            <span className="text-xs">{message}</span>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Inner login form component that uses useSearchParams().
+ * Rendered inside a <Suspense> boundary ONLY after auth bootstrap
+ * confirms the user is unauthenticated.
+ */
+function LoginForm() {
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirect") || "/dashboard";
 
@@ -237,5 +266,55 @@ export default function LoginPage() {
         Domain Copilot Governance Engine · Role-Based Access Control (FR-8) Enforced Server-Side
       </p>
     </div>
+  );
+}
+
+/**
+ * Root LoginPage (AuthBootstrap).
+ *
+ * Responsibilities:
+ * 1. Executes auth bootstrap useEffect calling /api/me immediately on first mount OUTSIDE Suspense.
+ * 2. Does NOT call useSearchParams(), avoiding Suspense hydration bailout at the page level.
+ * 3. Handles terminal auth states:
+ *    - "initializing": renders loading card.
+ *    - "authenticated": redirects to destination.
+ *    - "unauthenticated": renders <Suspense><LoginForm /></Suspense>.
+ */
+export default function LoginPage() {
+  const [authState, setAuthState] = useState<"initializing" | "authenticated" | "unauthenticated">("initializing");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkExistingSession() {
+      try {
+        const res = await fetch("/api/me");
+        if (!cancelled && res.ok) {
+          setAuthState("authenticated");
+          const searchParams = new URLSearchParams(window.location.search);
+          const redirectTo = searchParams.get("redirect") || "/dashboard";
+          window.location.href = redirectTo;
+          return;
+        }
+      } catch {
+        // Network error -> treat as unauthenticated
+      }
+      if (!cancelled) {
+        setAuthState("unauthenticated");
+      }
+    }
+
+    checkExistingSession();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (authState === "initializing" || authState === "authenticated") {
+    return <LoginLoadingCard message="Verifying session..." />;
+  }
+
+  return (
+    <Suspense fallback={<LoginLoadingCard message="Loading..." />}>
+      <LoginForm />
+    </Suspense>
   );
 }

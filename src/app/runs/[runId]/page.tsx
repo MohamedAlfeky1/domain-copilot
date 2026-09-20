@@ -3,9 +3,17 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppIcons } from "@/components/ui/icons";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableHeader,
@@ -26,43 +34,84 @@ export default function RunTracePage() {
   const [usage, setUsage] = useState<any[]>([]);
   const [selectedStep, setSelectedStep] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
+    let isCancelled = false;
+
     const fetchRunData = async () => {
       try {
         setLoading(true);
-        // 1. Fetch available runs
-        const runsRes = await fetch("/api/evaluation/runs");
-        const runsData = await runsRes.json();
-        const recentRuns = runsData.recentResults || [];
-        setRuns(recentRuns);
+        setNotFound(false);
 
-        // Determine active runId
-        let targetId = runIdParam;
-        if (targetId === "latest" && recentRuns.length > 0) {
-          targetId = recentRuns[0].runId || recentRuns[0].id;
+        // 1. Fetch available operational runs
+        const runsRes = await fetch("/api/runs");
+        let availableRuns: any[] = [];
+        if (runsRes.ok) {
+          const runsData = await runsRes.json();
+          availableRuns = runsData.runs || [];
+          if (!isCancelled) {
+            setRuns(availableRuns);
+          }
         }
 
-        if (targetId && targetId !== "latest") {
-          const res = await fetch(`/api/runs/${targetId}`);
+        // 2. Determine target runId
+        let targetId: string | null = null;
+        if (runIdParam === "latest") {
+          if (availableRuns.length > 0) {
+            targetId = availableRuns[0].id;
+          }
+        } else {
+          targetId = runIdParam;
+        }
+
+        // 3. Fetch detailed run trace if targetId exists
+        if (targetId) {
+          const res = await fetch(`/api/runs/${encodeURIComponent(targetId)}`);
+          if (isCancelled) return;
+
           if (res.ok) {
             const data = await res.json();
             setSelectedRun(data.run);
             setSteps(data.steps || []);
             setUsage(data.usage || []);
-            // Auto-select retrieval step if present
+            // Auto-select retrieval step if present, else first step
             const retStep = data.steps?.find((s: any) => s.stepType === "RETRIEVAL");
             setSelectedStep(retStep || data.steps?.[0] || null);
+            setNotFound(false);
+          } else {
+            setSelectedRun(null);
+            setSteps([]);
+            setUsage([]);
+            setSelectedStep(null);
+            setNotFound(true);
           }
+        } else {
+          // No operational runs available for "latest"
+          setSelectedRun(null);
+          setSteps([]);
+          setUsage([]);
+          setSelectedStep(null);
+          setNotFound(false);
         }
       } catch (err) {
-        console.error(err);
+        console.error("Failed to fetch run trace:", err);
+        if (!isCancelled) {
+          setSelectedRun(null);
+          setNotFound(true);
+        }
       } finally {
-        setLoading(false);
+        if (!isCancelled) {
+          setLoading(false);
+        }
       }
     };
 
     fetchRunData();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [runIdParam]);
 
   const retrievalTrace = steps.find((s) => s.stepType === "RETRIEVAL")?.outputPayload;
@@ -93,13 +142,129 @@ export default function RunTracePage() {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="px-3 py-1.5 rounded-md bg-muted border border-border font-mono text-xs text-muted-foreground">
-            Run ID: <strong className="text-foreground">{selectedRun?.id || runIdParam}</strong>
-          </div>
+          {/* Run Selector */}
+          {runs.length > 0 && (
+            <div className="w-[300px] sm:w-[340px]">
+              <Select
+                value={selectedRun?.id || (runIdParam !== "latest" ? runIdParam : "")}
+                onValueChange={(value) => {
+                  if (value && value !== selectedRun?.id) {
+                    router.push(`/runs/${value}`);
+                  }
+                }}
+              >
+                <SelectTrigger className="h-8 text-xs font-mono bg-background border-border">
+                  <SelectValue placeholder="Select operational run..." />
+                </SelectTrigger>
+                <SelectContent className="max-h-[300px] w-[340px] sm:w-[420px]">
+                  {runs.map((r) => {
+                    const shortId = r.id.length > 16 ? `${r.id.slice(0, 14)}...` : r.id;
+                    const dateStr = r.startedAt
+                      ? new Date(r.startedAt).toLocaleString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })
+                      : "";
+                    const querySnippet = r.query ? `"${r.query.slice(0, 32)}${r.query.length > 32 ? "..." : ""}"` : "";
+                    return (
+                      <SelectItem key={r.id} value={r.id} className="text-xs font-mono py-2">
+                        <div className="flex flex-col gap-0.5 text-left w-full">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground">{shortId}</span>
+                            <span
+                              className={`text-[10px] px-1 py-0.2 rounded font-bold ${
+                                r.status === "COMPLETED"
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : r.status === "REFUSED"
+                                  ? "text-amber-600 dark:text-amber-400"
+                                  : r.status === "FAILED"
+                                  ? "text-rose-600 dark:text-rose-400"
+                                  : "text-blue-600 dark:text-blue-400"
+                              }`}
+                            >
+                              {r.status}
+                            </span>
+                            {dateStr && <span className="text-[10px] text-muted-foreground ml-auto">{dateStr}</span>}
+                          </div>
+                          {querySnippet && (
+                            <span className="text-[11px] text-muted-foreground font-sans truncate max-w-[280px]">
+                              {querySnippet}
+                            </span>
+                          )}
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Run ID Badge: Only show when a real run is selected */}
+          {selectedRun?.id && (
+            <div className="px-3 py-1.5 rounded-md bg-muted border border-border font-mono text-xs text-muted-foreground whitespace-nowrap">
+              Run ID: <strong className="text-foreground">{selectedRun.id}</strong>
+            </div>
+          )}
         </div>
       </Card>
 
-      {selectedRun ? (
+      {/* Main Content Area */}
+      {loading ? (
+        <div className="space-y-6">
+          {/* Skeletons for KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={i} className="p-4 shadow-xs bg-card border-border">
+                <Skeleton className="h-3 w-20 mb-2" />
+                <Skeleton className="h-4 w-32" />
+              </Card>
+            ))}
+          </div>
+
+          {/* Skeletons for Query */}
+          <Card className="p-4 shadow-xs bg-muted/30 border-border">
+            <Skeleton className="h-3 w-16 mb-2" />
+            <Skeleton className="h-4 w-3/4" />
+          </Card>
+
+          {/* Skeletons for Waterfall */}
+          <Card className="p-5 shadow-sm bg-card border-border space-y-3">
+            <Skeleton className="h-4 w-48 mb-4" />
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-12 w-full rounded-lg" />
+              ))}
+            </div>
+          </Card>
+
+          {/* Skeletons for Table */}
+          <Card className="p-5 shadow-sm bg-card border-border">
+            <Skeleton className="h-4 w-60 mb-4" />
+            <Skeleton className="h-32 w-full rounded-md" />
+          </Card>
+        </div>
+      ) : notFound ? (
+        <Card className="p-12 text-center text-muted-foreground text-xs bg-muted/20 border-dashed border-border shadow-xs">
+          <AppIcons.warning className="w-8 h-8 mx-auto mb-2 text-destructive opacity-80" />
+          <p className="font-medium text-foreground text-sm">Run not found.</p>
+          <p className="text-[11px] mt-1 text-muted-foreground">
+            The requested run ID does not exist or you do not have permission to inspect it.
+          </p>
+          {runs.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-4 text-xs font-mono"
+              onClick={() => router.push(`/runs/${runs[0].id}`)}
+            >
+              View Latest Operational Run ({runs[0].id.length > 16 ? `${runs[0].id.slice(0, 14)}...` : runs[0].id})
+            </Button>
+          )}
+        </Card>
+      ) : selectedRun ? (
         <div className="space-y-6">
           {/* Run Header KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -415,10 +580,18 @@ export default function RunTracePage() {
       ) : (
         <Card className="p-12 text-center text-muted-foreground text-xs bg-muted/20 border-dashed border-border shadow-xs">
           <AppIcons.runs className="w-8 h-8 mx-auto mb-2 text-primary opacity-60" />
-          <p className="font-medium text-foreground">Select a run from the history or submit a query on Copilot</p>
+          <p className="font-medium text-foreground text-sm">No runs recorded yet.</p>
           <p className="text-[11px] mt-1 text-muted-foreground">
-            Traces visualize dense candidates, FTS candidates, RRF fusion, and per-token pricing.
+            Submit a query from Copilot to create a run.
           </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-4 text-xs"
+            onClick={() => router.push("/copilot")}
+          >
+            Open Copilot
+          </Button>
         </Card>
       )}
     </div>

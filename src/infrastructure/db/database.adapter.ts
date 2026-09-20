@@ -273,6 +273,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
         approvals: Array.from(this.approvals.entries()),
         approvalEvents: this.approvalEvents,
         usageLedger: this.usageLedger,
+        evalResults: this.evalResults,
         conversations: Array.from(this.conversations.entries()),
         messages: Array.from(this.messages.entries()),
       };
@@ -301,6 +302,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
       if (state.approvals) this.approvals = new Map(state.approvals);
       if (state.approvalEvents) this.approvalEvents = state.approvalEvents;
       if (state.usageLedger) this.usageLedger = state.usageLedger;
+      if (state.evalResults) this.evalResults = state.evalResults;
       if (state.conversations) this.conversations = new Map(state.conversations);
       if (state.messages) this.messages = new Map(state.messages);
 
@@ -1320,6 +1322,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
 
   async saveEvaluationResult(result: EvaluationResult): Promise<void> {
     this.evalResults.push(result);
+    this.scheduleDiskPersist();
   }
 
   async listEvaluationResults(): Promise<EvaluationResult[]> {
