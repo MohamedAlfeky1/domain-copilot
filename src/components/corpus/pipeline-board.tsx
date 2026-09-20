@@ -2,6 +2,7 @@ import React from "react";
 import { AppIcons } from "@/components/ui/icons";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface IngestionJob {
   id: string;
@@ -16,6 +17,7 @@ interface PipelineBoardProps {
   totalChunks: number;
   jobs?: IngestionJob[];
   isUploading?: boolean;
+  loading?: boolean;
 }
 
 const STAGES = [
@@ -61,6 +63,7 @@ export function PipelineBoard({
   totalChunks,
   jobs = [],
   isUploading = false,
+  loading = false,
 }: PipelineBoardProps) {
   const hasDocuments = totalDocuments > 0;
   const activeJob = jobs.find((j) => j.status === "RUNNING" || j.status === "PROCESSING");
@@ -84,7 +87,9 @@ export function PipelineBoard({
         </div>
 
         <div>
-          {isUploading ? (
+          {loading ? (
+            <Skeleton className="h-5 w-28 rounded-full" />
+          ) : isUploading ? (
             <Badge variant="info" className="gap-1 animate-pulse font-mono text-[10px]">
               <AppIcons.loading className="w-3 h-3 animate-spin" />
               Ingesting Active Payload
@@ -104,17 +109,59 @@ export function PipelineBoard({
       </div>
 
       {/* Visual Stepper: 01 Extract → 02 Clean → 03 Chunk → 04 Embed → 05 Index */}
-      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 relative">
+      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5 relative items-stretch">
         {STAGES.map((stage, idx) => {
           const Icon = stage.icon;
           const isComplete = hasDocuments && !isUploading;
           const isCurrent = isUploading && (activeJob ? activeJob.stage === stage.id : idx === 0);
           const isPending = !hasDocuments && !isUploading;
 
+          if (loading) {
+            return (
+              <div key={stage.id} className="relative flex flex-col h-full justify-center">
+                <div className="p-3.5 rounded-lg border border-border/60 bg-muted/10 w-full h-full flex flex-col justify-between transition-all">
+                  <div className="flex flex-col flex-1">
+                    {/* Top Row: Phase number on the left + icon on the right */}
+                    <div className="flex items-center justify-between mb-2.5">
+                      <span className="font-mono text-[11px] font-bold text-muted-foreground/70">
+                        {stage.step}
+                      </span>
+                      <Skeleton className="w-3.5 h-3.5 rounded" />
+                    </div>
+
+                    {/* Phase Title */}
+                    <h4 className="text-xs font-bold font-mono tracking-tight text-foreground">
+                      {stage.title}
+                    </h4>
+
+                    {/* Description with comfortable line-height and spacing */}
+                    <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
+                      {stage.description}
+                    </p>
+
+                    {/* Flexible spacer to ensure consistent height & bottom alignment */}
+                    <div className="flex-1 min-h-[10px]" />
+                  </div>
+
+                  {/* Subtle Divider + Bottom Row: Vol: on the left + value on the right */}
+                  <div className="pt-2 mt-3 border-t border-border/60 flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-muted-foreground">Vol:</span>
+                    <Skeleton className="h-3.5 w-10 rounded" />
+                  </div>
+                </div>
+
+                {/* Arrow Connector on desktop between stages */}
+                {idx < STAGES.length - 1 && (
+                  <AppIcons.chevronRight className="hidden sm:block absolute -right-2 top-1/2 -translate-y-1/2 text-muted-foreground/40 w-3.5 h-3.5 z-10 pointer-events-none" />
+                )}
+              </div>
+            );
+          }
+
           return (
-            <div key={stage.id} className="flex items-center relative">
+            <div key={stage.id} className="relative flex flex-col h-full justify-center">
               <div
-                className={`p-3 rounded-lg border w-full flex flex-col justify-between transition-all ${
+                className={`p-3.5 rounded-lg border w-full h-full flex flex-col justify-between transition-all ${
                   isCurrent
                     ? "bg-primary/5 border-primary shadow-xs ring-1 ring-primary/20"
                     : isComplete
@@ -122,8 +169,9 @@ export function PipelineBoard({
                     : "bg-muted/10 border-border/60 opacity-60 text-muted-foreground"
                 }`}
               >
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
+                <div className="flex flex-col flex-1">
+                  {/* Top Row: Phase number on the left + icon on the right */}
+                  <div className="flex items-center justify-between mb-2.5">
                     <span
                       className={`font-mono text-[11px] font-bold ${
                         isCurrent
@@ -146,15 +194,22 @@ export function PipelineBoard({
                     />
                   </div>
 
+                  {/* Phase Title */}
                   <h4 className="text-xs font-bold font-mono tracking-tight text-foreground">
                     {stage.title}
                   </h4>
-                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight line-clamp-2">
+
+                  {/* Description with comfortable line-height and spacing */}
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
                     {stage.description}
                   </p>
+
+                  {/* Flexible spacer to ensure consistent height & bottom alignment */}
+                  <div className="flex-1 min-h-[10px]" />
                 </div>
 
-                <div className="mt-2 pt-1.5 border-t border-border/50 flex items-center justify-between text-[10px] font-mono">
+                {/* Subtle Divider + Bottom Row: Vol: on the left + value on the right */}
+                <div className="pt-2 mt-3 border-t border-border/60 flex items-center justify-between text-[10px] font-mono">
                   <span className="text-muted-foreground">Vol:</span>
                   <span className="font-bold text-foreground">
                     {isComplete
@@ -170,7 +225,7 @@ export function PipelineBoard({
 
               {/* Arrow Connector on desktop between stages */}
               {idx < STAGES.length - 1 && (
-                <AppIcons.chevronRight className="hidden sm:block absolute -right-2 text-muted-foreground/40 w-3.5 h-3.5 z-10 pointer-events-none" />
+                <AppIcons.chevronRight className="hidden sm:block absolute -right-2 top-1/2 -translate-y-1/2 text-muted-foreground/40 w-3.5 h-3.5 z-10 pointer-events-none" />
               )}
             </div>
           );

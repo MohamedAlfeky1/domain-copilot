@@ -218,3 +218,57 @@ export function validateVectorSpaceConsistency(
     );
   }
 }
+
+// -----------------------------------------------------------------------------
+// 3. Runtime Metadata Resolution (Non-Sensitive)
+// -----------------------------------------------------------------------------
+
+export interface AIRuntimeMetadata {
+  provider: string;
+  completionModel: string;
+  embeddingProvider: string;
+  embeddingModel: string;
+  stepTimeoutMs: number;
+}
+
+/**
+ * Returns safe runtime metadata regarding active LLM and Embedding providers.
+ * Exposes ONLY model and provider identifiers, never sensitive API keys or credentials.
+ */
+export function getAIRuntimeMetadata(
+  config?: AIProviderConfig,
+  embConfig?: EmbeddingProviderConfig
+): AIRuntimeMetadata {
+  const provider = (config?.provider ?? process.env.AI_PROVIDER ?? "").trim().toLowerCase();
+  let completionModel = "Unavailable";
+  let providerFormatted = provider ? provider.toUpperCase() : "UNAVAILABLE";
+
+  if (provider === "ollama") {
+    completionModel = config?.model ?? process.env.OLLAMA_MODEL ?? "qwen3:8b";
+  } else if (provider === "openrouter") {
+    completionModel = config?.model ?? process.env.OPENROUTER_MODEL ?? process.env.AI_MODEL ?? "openai/gpt-4o";
+  } else if (provider === "openai") {
+    completionModel = config?.model ?? process.env.AI_MODEL ?? "gpt-4o";
+  }
+
+  const rawEmbeddingProvider = (embConfig?.provider ?? process.env.EMBEDDING_PROVIDER ?? "gemini").trim().toLowerCase();
+  let embeddingModel = "Unavailable";
+  let embProviderFormatted = rawEmbeddingProvider ? rawEmbeddingProvider.toUpperCase() : "GEMINI";
+
+  if (rawEmbeddingProvider === "gemini") {
+    embeddingModel = embConfig?.model ?? process.env.GEMINI_EMBEDDING_MODEL ?? "models/gemini-embedding-001";
+  } else if (rawEmbeddingProvider === "openai") {
+    embeddingModel = embConfig?.model ?? process.env.EMBEDDING_MODEL ?? "text-embedding-3-small";
+  }
+
+  const stepTimeoutMs = resolveStepTimeoutMs(provider);
+
+  return {
+    provider: providerFormatted,
+    completionModel,
+    embeddingProvider: embProviderFormatted,
+    embeddingModel,
+    stepTimeoutMs,
+  };
+}
+

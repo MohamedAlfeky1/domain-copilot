@@ -5,9 +5,11 @@ import { AppIcons } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface CorpusHeaderProps {
-  loading: boolean;
+  loading?: boolean;
+  refreshing?: boolean;
   uploading: boolean;
   readyStatus: "READY" | "UNHEALTHY" | "CHECKING";
   onRefresh: () => void;
@@ -15,7 +17,8 @@ interface CorpusHeaderProps {
 }
 
 export function CorpusHeader({
-  loading,
+  loading = false,
+  refreshing = false,
   uploading,
   readyStatus,
   onRefresh,
@@ -31,27 +34,31 @@ export function CorpusHeader({
               Knowledge Pipeline
             </span>
             <span className="text-muted-foreground/50">/</span>
-            <Badge
-              variant={readyStatus === "READY" ? "success" : readyStatus === "UNHEALTHY" ? "destructive" : "secondary"}
-              className="gap-1 font-mono text-[10px] uppercase font-bold"
-            >
-              {readyStatus === "READY" ? (
-                <>
-                  <AppIcons.success className="w-3 h-3" />
-                  Pipeline Healthy
-                </>
-              ) : readyStatus === "UNHEALTHY" ? (
-                <>
-                  <AppIcons.warning className="w-3 h-3" />
-                  Attention Required
-                </>
-              ) : (
-                <>
-                  <AppIcons.loading className="w-3 h-3 animate-spin" />
-                  Checking Readiness...
-                </>
-              )}
-            </Badge>
+            {loading ? (
+              <Skeleton className="h-5 w-28 rounded-full" />
+            ) : (
+              <Badge
+                variant={readyStatus === "READY" ? "success" : readyStatus === "UNHEALTHY" ? "destructive" : "secondary"}
+                className="gap-1 font-mono text-[10px] uppercase font-bold"
+              >
+                {readyStatus === "READY" ? (
+                  <>
+                    <AppIcons.success className="w-3 h-3" />
+                    Pipeline Healthy
+                  </>
+                ) : readyStatus === "UNHEALTHY" ? (
+                  <>
+                    <AppIcons.warning className="w-3 h-3" />
+                    Attention Required
+                  </>
+                ) : (
+                  <>
+                    <AppIcons.loading className="w-3 h-3 animate-spin" />
+                    Checking Readiness...
+                  </>
+                )}
+              </Badge>
+            )}
             <span className="text-xs text-muted-foreground font-mono hidden sm:inline">
               Deterministic Chunking &amp; Dual-Index pgvector
             </span>
@@ -72,10 +79,10 @@ export function CorpusHeader({
             variant="outline"
             size="sm"
             onClick={onRefresh}
-            disabled={loading}
+            disabled={loading || refreshing}
             className="gap-1.5 text-xs h-9 shadow-xs"
           >
-            <AppIcons.refresh className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            <AppIcons.refresh className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
             <span>Refresh</span>
           </Button>
 

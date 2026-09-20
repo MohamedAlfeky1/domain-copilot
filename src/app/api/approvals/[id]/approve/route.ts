@@ -34,6 +34,7 @@ export async function POST(
     return NextResponse.json({
       message: "Approval granted successfully",
       approval,
+      conversationId: run?.sessionId || null,
       resumable: isResumable,
       resumeEndpoint: isResumable
         ? `/api/runs/${approval.runId}/resume`

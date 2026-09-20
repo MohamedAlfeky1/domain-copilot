@@ -2,12 +2,14 @@ import React from "react";
 import { AppIcons } from "@/components/ui/icons";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface CorpusKpiGridProps {
   totalDocuments: number;
   totalPages: number;
   totalChunks: number;
   failureCount: number;
+  loading?: boolean;
 }
 
 export function CorpusKpiGrid({
@@ -15,7 +17,78 @@ export function CorpusKpiGrid({
   totalPages,
   totalChunks,
   failureCount,
+  loading = false,
 }: CorpusKpiGridProps) {
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* 1. Documents */}
+        <Card className="p-4 bg-card border-border shadow-xs">
+          <div className="flex items-center justify-between text-muted-foreground mb-1.5">
+            <span className="text-[11px] font-mono uppercase font-semibold">Documents</span>
+            <div className="w-8 h-8 rounded-md bg-sky-500/10 text-sky-600 flex items-center justify-center">
+              <AppIcons.documents className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="h-8 flex items-center">
+            <Skeleton className="h-7 w-12 rounded" />
+          </div>
+          <div className="mt-1">
+            <Skeleton className="h-3.5 w-32 rounded" />
+          </div>
+        </Card>
+
+        {/* 2. Total Pages */}
+        <Card className="p-4 bg-card border-border shadow-xs">
+          <div className="flex items-center justify-between text-muted-foreground mb-1.5">
+            <span className="text-[11px] font-mono uppercase font-semibold">Total Pages</span>
+            <div className="w-8 h-8 rounded-md bg-indigo-500/10 text-indigo-600 flex items-center justify-center">
+              <AppIcons.pages className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="h-8 flex items-center">
+            <Skeleton className="h-7 w-12 rounded" />
+          </div>
+          <div className="mt-1">
+            <Skeleton className="h-3.5 w-36 rounded" />
+          </div>
+        </Card>
+
+        {/* 3. Indexed Chunks */}
+        <Card className="p-4 bg-card border-border shadow-xs">
+          <div className="flex items-center justify-between text-muted-foreground mb-1.5">
+            <span className="text-[11px] font-mono uppercase font-semibold">Indexed Chunks</span>
+            <div className="w-8 h-8 rounded-md bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+              <AppIcons.chunks className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="h-8 flex items-center">
+            <Skeleton className="h-7 w-12 rounded" />
+          </div>
+          <div className="mt-1">
+            <Skeleton className="h-3.5 w-28 rounded" />
+          </div>
+        </Card>
+
+        {/* 4. Pipeline Failures */}
+        <Card className="p-4 bg-card border-border shadow-xs">
+          <div className="flex items-center justify-between text-muted-foreground mb-1.5">
+            <span className="text-[11px] font-mono uppercase font-semibold">Pipeline Failures</span>
+            <div className="w-8 h-8 rounded-md bg-muted/60 flex items-center justify-center">
+              <Skeleton className="w-4 h-4 rounded" />
+            </div>
+          </div>
+          <div className="h-8 flex items-center">
+            <Skeleton className="h-7 w-8 rounded" />
+          </div>
+          <div className="mt-1">
+            <Skeleton className="h-3.5 w-36 rounded" />
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       {/* 1. Documents */}

@@ -3,9 +3,24 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { AppIcons } from "@/components/ui/icons";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { toast, useToast } from "@/components/ui/use-toast";
+import { FiCheckCircle } from "react-icons/fi";
+import { LuBot, LuArrowUp, LuLoaderCircle } from "react-icons/lu";
+import { cn } from "@/lib/utils";
+import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 
 interface Citation {
   citationId: string;
@@ -109,7 +124,154 @@ function formatRelativeTime(dateString: string): string {
   }
 }
 
+export interface WorkflowStageInfo {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean | "true" | "false" }>;
+  shimmer: boolean;
+}
+
+const DEFAULT_STAGE: WorkflowStageInfo = {
+  id: "retrieval",
+  label: "Retrieving clinical evidence...",
+  icon: AppIcons.search,
+  shimmer: true,
+};
+
+function getWorkflowStage(agentOrEvent?: string, eventType?: string): WorkflowStageInfo {
+  const agentLower = (agentOrEvent || "").toLowerCase();
+  const evtLower = (eventType || "").toLowerCase();
+
+  // 1. Explicit SSE event types take precedence
+  if (evtLower === "refusal") {
+    return {
+      id: "refusal",
+      label: "Request refused: insufficient evidence",
+      icon: AppIcons.error,
+      shimmer: false,
+    };
+  }
+
+  if (evtLower === "error") {
+    return {
+      id: "error",
+      label: "Workflow failed",
+      icon: AppIcons.warning,
+      shimmer: false,
+    };
+  }
+
+  if (evtLower === "done") {
+    return {
+      id: "done",
+      label: "Grounded response ready",
+      icon: AppIcons.success,
+      shimmer: false,
+    };
+  }
+
+  if (
+    evtLower === "approval_required" ||
+    agentLower.includes("hitl approval gate") ||
+    agentLower.includes("approval_pending")
+  ) {
+    return {
+      id: "hitl",
+      label: "Human approval required",
+      icon: AppIcons.user,
+      shimmer: false,
+    };
+  }
+
+  if (evtLower === "run_resumed" || agentLower.includes("resum")) {
+    return {
+      id: "resume",
+      label: "Resuming approved workflow...",
+      icon: AppIcons.refresh,
+      shimmer: true,
+    };
+  }
+
+  if (
+    evtLower === "twist_evaluation" ||
+    agentLower.includes("twist guard") ||
+    agentLower.includes("policy guard")
+  ) {
+    return {
+      id: "twist_guard",
+      label: "Running safety and Twist Guard checks...",
+      icon: AppIcons.warning,
+      shimmer: true,
+    };
+  }
+
+  // 2. Step Agent Names
+  if (agentLower.includes("retriev")) {
+    return {
+      id: "retrieval",
+      label: "Retrieving clinical evidence...",
+      icon: AppIcons.search,
+      shimmer: true,
+    };
+  }
+
+  if (agentLower.includes("extractor") || agentLower.includes("evidence")) {
+    return {
+      id: "extractor",
+      label: "Extracting relevant clinical evidence...",
+      icon: AppIcons.documents,
+      shimmer: true,
+    };
+  }
+
+  if (
+    agentLower.includes("auditor") ||
+    agentLower.includes("contraindication") ||
+    agentLower.includes("safety") ||
+    agentLower.includes("risk")
+  ) {
+    return {
+      id: "auditor",
+      label: "Checking contraindications and interactions...",
+      icon: AppIcons.shieldCheck,
+      shimmer: true,
+    };
+  }
+
+  if (
+    agentLower.includes("drafter") ||
+    agentLower.includes("therapeutic") ||
+    agentLower.includes("synthesis")
+  ) {
+    return {
+      id: "drafter",
+      label: "Generating grounded protocol synthesis...",
+      icon: AppIcons.sparkles,
+      shimmer: true,
+    };
+  }
+
+  if (agentLower.includes("tool executor")) {
+    return {
+      id: "tool_executor",
+      label: "Executing approved clinical action...",
+      icon: AppIcons.activity,
+      shimmer: true,
+    };
+  }
+
+  // 3. Fallback for unknown backend event/stage (safe generic status)
+  return {
+    id: "unknown",
+    label: "Processing request...",
+    icon: AppIcons.activity,
+    shimmer: true,
+  };
+}
+
 export default function CopilotPage() {
+  const { toast } = useToast();
+
   // Conversations State
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
@@ -118,9 +280,15 @@ export default function CopilotPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
 
+  // Delete Conversation Dialog State
+  const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
+  const [isDeletingConversation, setIsDeletingConversation] = useState(false);
+
   // Input & Streaming State
   const [query, setQuery] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [currentStage, setCurrentStage] = useState<WorkflowStageInfo>(DEFAULT_STAGE);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [streamedText, setStreamedText] = useState("");
   const [streamCitations, setStreamCitations] = useState<Citation[]>([]);
@@ -134,6 +302,18 @@ export default function CopilotPage() {
   // HITL Approval State
   const [pendingApproval, setPendingApproval] = useState<ApprovalInfo | null>(null);
   const [isAwaitingApproval, setIsAwaitingApproval] = useState(false);
+  const [checkingApproval, setCheckingApproval] = useState(false);
+  const activeConversationIdRef = useRef<string | null>(null);
+
+  // User Permissions (for inline HITL approval authorization)
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+  const [currentUserPermissions, setCurrentUserPermissions] = useState<string[]>([]);
+  const [inlineApproving, setInlineApproving] = useState(false);
+
+  const canApprove =
+    currentUserRole === "ADMIN" ||
+    currentUserRole === "APPROVER" ||
+    currentUserPermissions.includes("APPROVE_ACTIONS");
 
   // Mandatory Twist State (TW-005)
   const [twistEvaluation, setTwistEvaluation] = useState<{
@@ -158,11 +338,137 @@ export default function CopilotPage() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const initialMountDone = useRef(false);
 
-  const resumeWorkflow = useCallback(async (runId: string, approvalId: string) => {
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversation?.id || null;
+  }, [activeConversation]);
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, streamedText, scrollToBottom]);
+
+  // Load Messages for a Conversation
+  const loadMessages = useCallback(async (conversationId: string) => {
+    setLoadingMessages(true);
+    setChatError(null);
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/messages`);
+      if (res.status === 401) {
+        window.location.href = `/login?returnUrl=/copilot?conversationId=${conversationId}`;
+        return;
+      }
+      if (res.status === 403) {
+        setChatError("Access denied: You do not have permission to access this chat.");
+        setMessages([]);
+        return;
+      }
+      if (res.status === 404) {
+        setChatError("This chat was not found.");
+        setMessages([]);
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(`Failed to load messages (${res.status})`);
+      }
+      const data = await res.json();
+      setMessages(data.messages || []);
+    } catch (err: any) {
+      setChatError(err.message || "Failed to load chat messages.");
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, []);
+
+  // Check if a conversation has a pending HITL approval
+  const checkConversationApproval = useCallback(async (conversationId: string) => {
+    setCheckingApproval(true);
+    try {
+      const res = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/approval`);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      // Guard: Ensure user has not switched to another conversation during the fetch
+      if (activeConversationIdRef.current !== conversationId) return;
+
+      if (data.hasPendingApproval && data.approval && data.status === "APPROVAL_PENDING") {
+        const approval = data.approval;
+        const isApproved = approval.status === "APPROVED" || approval.status === "EDIT_APPROVED";
+
+        setCurrentRunId(data.runId);
+        setPendingApproval({
+          approvalId: approval.id || approval.approvalId,
+          riskLevel: approval.riskLevel || "HIGH",
+          proposedAction: approval.proposedAction || "Action requires human review",
+          riskFlags: approval.riskFlags || [],
+          status: approval.status,
+        });
+        setIsAwaitingApproval(true);
+        setCurrentStage(getWorkflowStage("", "approval_required"));
+
+        setSteps([
+          { agent: "Retrieval Engine (Cross-Lingual AR+EN)", status: "completed" },
+          { agent: "Clinical Evidence Extractor", status: "completed" },
+          { agent: "Contraindication & Safety Auditor", status: "completed" },
+          { agent: "Bilingual Context & Policy Guard", status: "completed" },
+          {
+            agent: "HITL Approval Gate",
+            status: isApproved ? "completed" : "approval_pending",
+          },
+          { agent: "Therapeutic Protocol Drafter", status: "pending" },
+        ]);
+      } else {
+        if (activeConversationIdRef.current === conversationId) {
+          setPendingApproval(null);
+          setIsAwaitingApproval(false);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to check conversation pending approval:", err);
+    } finally {
+      if (activeConversationIdRef.current === conversationId) {
+        setCheckingApproval(false);
+      }
+    }
+  }, []);
+
+  // Select Active Conversation
+  const selectConversation = useCallback((conv: Conversation) => {
+    activeConversationIdRef.current = conv.id;
+    setActiveConversation(conv);
+    // Reset transient stream states
+    setStreamedText("");
+    setStreamCitations([]);
+    setIsRefused(false);
+    setRefusalMessage("");
+    setPendingApproval(null);
+    setIsAwaitingApproval(false);
+    setInlineApproving(false);
+    setTwistEvaluation(null);
+    setSelectedCitation(null);
+    setCurrentStage(DEFAULT_STAGE);
+
+    // Update URL query param without reload
+    const url = new URL(window.location.href);
+    url.searchParams.set("conversationId", conv.id);
+    url.searchParams.delete("runId");
+    url.searchParams.delete("resume");
+    window.history.pushState({}, "", url.toString());
+
+    loadMessages(conv.id);
+    checkConversationApproval(conv.id);
+  }, [loadMessages, checkConversationApproval]);
+
+  const resumeWorkflow = useCallback(async (runId: string, approvalId: string, convId?: string) => {
     if (resumeInProgressRef.current) return;
     resumeInProgressRef.current = true;
     setStreaming(true);
     setIsAwaitingApproval(false);
+    setCurrentStage(getWorkflowStage("", "run_resumed"));
 
     // Strip resume=true from URL immediately to prevent duplicate runs on page reload
     try {
@@ -170,6 +476,18 @@ export default function CopilotPage() {
       url.searchParams.delete("resume");
       window.history.replaceState(null, "", url.pathname + url.search);
     } catch {}
+
+    // Resolve target conversation ID
+    let targetConversationId = convId || activeConversation?.id;
+    if (!targetConversationId) {
+      try {
+        const rRes = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
+        if (rRes.ok) {
+          const rData = await rRes.json();
+          targetConversationId = rData.conversationId || rData.run?.sessionId;
+        }
+      } catch {}
+    }
 
     // Update steps: mark HITL gate completed, mark Drafter running
     setSteps((prev) => {
@@ -209,6 +527,30 @@ export default function CopilotPage() {
       });
 
       if (!res.ok) {
+        // If 409 Conflict, the run may already have been resumed or completed
+        if (res.status === 409) {
+          const runRes = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
+          if (runRes.ok) {
+            const runData = await runRes.json();
+            const cId = targetConversationId || runData.conversationId || runData.run?.sessionId;
+            if (cId) {
+              if (!activeConversation || activeConversation.id !== cId) {
+                const singleConvRes = await fetch(`/api/conversations/${cId}`);
+                if (singleConvRes.ok) {
+                  const scData = await singleConvRes.json();
+                  setActiveConversation(scData.conversation);
+                }
+              }
+              await loadMessages(cId);
+              setStreamedText("");
+              setStreamCitations([]);
+              setStreaming(false);
+              setIsAwaitingApproval(false);
+              setPendingApproval(null);
+              return;
+            }
+          }
+        }
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || `Resume failed with HTTP ${res.status}`);
       }
@@ -249,7 +591,9 @@ export default function CopilotPage() {
                 setStreaming(true);
                 setIsAwaitingApproval(false);
                 setPendingApproval(null);
+                setCurrentStage(getWorkflowStage("", "run_resumed"));
               } else if (eventType === "step_start") {
+                setCurrentStage(getWorkflowStage(data.agent, "step_start"));
                 setSteps((prev) =>
                   prev.map((s) => {
                     const match =
@@ -278,30 +622,51 @@ export default function CopilotPage() {
                   });
                 }
               } else if (eventType === "done") {
-                setStreaming(false);
+                setCurrentStage(getWorkflowStage("", "done"));
                 setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" })));
-                const cleanAnswer = data.finalAnswer || data.data?.finalAnswer;
-                if (cleanAnswer) {
-                  setStreamedText(normalizeDisplayText(cleanAnswer));
-                } else {
-                  setStreamedText((prev) => normalizeDisplayText(prev));
-                }
-                if (Array.isArray(data.citations) && data.citations.length > 0) {
-                  setStreamCitations(data.citations);
-                } else if (Array.isArray(data.data?.citations) && data.data.citations.length > 0) {
-                  setStreamCitations(data.data.citations);
-                }
                 try {
                   localStorage.removeItem("copilot_active_run_id");
                 } catch {}
+
+                // Load the authoritative persisted message from the server before turning off streaming
+                if (targetConversationId) {
+                  if (!activeConversation || activeConversation.id !== targetConversationId) {
+                    try {
+                      const cRes = await fetch(`/api/conversations/${targetConversationId}`);
+                      if (cRes.ok) {
+                        const cData = await cRes.json();
+                        setActiveConversation(cData.conversation);
+                      }
+                    } catch {}
+                  }
+                  await loadMessages(targetConversationId);
+                  setStreamedText("");
+                  setStreamCitations([]);
+                } else {
+                  const cleanAnswer = data.finalAnswer || data.data?.finalAnswer;
+                  if (cleanAnswer) {
+                    setStreamedText(normalizeDisplayText(cleanAnswer));
+                  }
+                  if (Array.isArray(data.citations) && data.citations.length > 0) {
+                    setStreamCitations(data.citations);
+                  }
+                }
+                setStreaming(false);
               } else if (eventType === "refusal") {
+                setCurrentStage(getWorkflowStage("", "refusal"));
                 setIsRefused(true);
                 setRefusalMessage(data.message || "Request was refused.");
                 setStreaming(false);
+                setIsAwaitingApproval(false);
+                setPendingApproval(null);
                 try {
                   localStorage.removeItem("copilot_active_run_id");
                 } catch {}
+                if (targetConversationId) {
+                  await loadMessages(targetConversationId);
+                }
               } else if (eventType === "error") {
+                setCurrentStage(getWorkflowStage("", "error"));
                 setStreaming(false);
                 if (data.message) {
                   setStreamedText((prev) => prev || `Workflow notification: ${data.message}`);
@@ -318,12 +683,32 @@ export default function CopilotPage() {
       }
     } catch (err: any) {
       if (err.name !== "AbortError") {
-        alert(`Resume failed: ${err.message}`);
+        toast({
+          title: "Resume Failed",
+          description: "Failed to resume run execution.",
+          variant: "destructive",
+        });
       }
       setStreaming(false);
     } finally {
       resumeInProgressRef.current = false;
     }
+  }, [activeConversation, loadMessages, toast]);
+
+  // Fetch authenticated user profile & permissions on mount
+  useEffect(() => {
+    let isMounted = true;
+    fetch("/api/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!isMounted || !data) return;
+        if (data.user?.role) setCurrentUserRole(data.user.role);
+        if (Array.isArray(data.permissions)) setCurrentUserPermissions(data.permissions);
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Mount-time rehydration effect
@@ -384,22 +769,29 @@ export default function CopilotPage() {
         const { run, approval } = data;
         if (!run) return;
 
+        const targetConvId = data.conversationId || run.sessionId;
+        if (targetConvId) {
+          if (!activeConversation || activeConversation.id !== targetConvId) {
+            try {
+              const cRes = await fetch(`/api/conversations/${targetConvId}`);
+              if (cRes.ok) {
+                const cData = await cRes.json();
+                setActiveConversation(cData.conversation);
+              }
+            } catch {}
+          }
+          await loadMessages(targetConvId);
+        }
+
         setCurrentRunId(run.id);
         if (run.query) setQuery(run.query);
-
-        if (run.citations && Array.isArray(run.citations)) {
-          setStreamCitations(run.citations);
-        }
-
-        const answerText = run.finalOutput || run.answer;
-        if (answerText) {
-          setStreamedText(normalizeDisplayText(answerText));
-        }
 
         if (run.status === "COMPLETED") {
           setStreaming(false);
           setIsAwaitingApproval(false);
           setPendingApproval(null);
+          setStreamedText("");
+          setStreamCitations([]);
           setSteps([
             { agent: "Retrieval Engine (Cross-Lingual AR+EN)", status: "completed" },
             { agent: "Clinical Evidence Extractor", status: "completed" },
@@ -422,6 +814,8 @@ export default function CopilotPage() {
           setRefusalMessage(run.refusalReason || run.answer || "Request refused by policy or human reviewer.");
           setIsAwaitingApproval(false);
           setPendingApproval(null);
+          setStreamedText("");
+          setStreamCitations([]);
           try {
             localStorage.removeItem("copilot_active_run_id");
           } catch {}
@@ -460,12 +854,14 @@ export default function CopilotPage() {
 
           if (shouldResume && isApproved && !resumeInProgressRef.current) {
             setIsAwaitingApproval(false);
-            await resumeWorkflow(run.id, approval.id);
+            await resumeWorkflow(run.id, approval.id, targetConvId);
           } else {
             setIsAwaitingApproval(true);
+            setCurrentStage(getWorkflowStage("", "approval_required"));
           }
         } else if (run.status === "RUNNING" || run.status === "STREAMING") {
           setStreaming(true);
+          setCurrentStage(getWorkflowStage("Retrieval Engine", "step_start"));
           setSteps((prev) =>
             prev.map((s, idx) => (idx === 0 ? { ...s, status: "running" } : s))
           );
@@ -480,70 +876,71 @@ export default function CopilotPage() {
     return () => {
       isCancelled = true;
     };
-  }, [resumeWorkflow]);
+  }, [resumeWorkflow, activeConversation, loadMessages]);
 
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
-
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
-
+  // Poll for approval status when awaiting approval
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, streamedText, scrollToBottom]);
+    if (!isAwaitingApproval || !currentRunId || streaming) return;
 
-  // Load Messages for a Conversation
-  const loadMessages = useCallback(async (conversationId: string) => {
-    setLoadingMessages(true);
-    setChatError(null);
-    try {
-      const res = await fetch(`/api/conversations/${conversationId}/messages`);
-      if (res.status === 401) {
-        window.location.href = `/login?returnUrl=/copilot?conversationId=${conversationId}`;
-        return;
-      }
-      if (res.status === 403) {
-        setChatError("Access denied: You do not have permission to access this chat.");
-        setMessages([]);
-        return;
-      }
-      if (res.status === 404) {
-        setChatError("This chat was not found.");
-        setMessages([]);
-        return;
-      }
-      if (!res.ok) {
-        throw new Error(`Failed to load messages (${res.status})`);
-      }
-      const data = await res.json();
-      setMessages(data.messages || []);
-    } catch (err: any) {
-      setChatError(err.message || "Failed to load chat messages.");
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, []);
+    let isCancelled = false;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/runs/${encodeURIComponent(currentRunId)}`);
+        if (!res.ok || isCancelled) return;
+        const data = await res.json();
+        const { run, approval } = data;
+        if (!run) return;
 
-  // Select Active Conversation
-  const selectConversation = useCallback((conv: Conversation) => {
-    setActiveConversation(conv);
-    // Reset transient stream states
-    setStreamedText("");
-    setStreamCitations([]);
-    setIsRefused(false);
-    setRefusalMessage("");
-    setPendingApproval(null);
-    setIsAwaitingApproval(false);
-    setTwistEvaluation(null);
-    setSelectedCitation(null);
+        const targetConvId = data.conversationId || run.sessionId || activeConversation?.id;
 
-    // Update URL query param without reload
-    const url = new URL(window.location.href);
-    url.searchParams.set("conversationId", conv.id);
-    window.history.pushState({}, "", url.toString());
+        // If run already completed in background:
+        if (run.status === "COMPLETED") {
+          clearInterval(interval);
+          if (targetConvId) {
+            await loadMessages(targetConvId);
+          }
+          setStreaming(false);
+          setIsAwaitingApproval(false);
+          setPendingApproval(null);
+          setStreamedText("");
+          setStreamCitations([]);
+          setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" })));
+          return;
+        }
 
-    loadMessages(conv.id);
-  }, [loadMessages]);
+        // If run was refused/rejected:
+        if (run.status === "REFUSED") {
+          clearInterval(interval);
+          setIsRefused(true);
+          setRefusalMessage(run.refusalReason || run.answer || "Request refused by policy or human reviewer.");
+          setIsAwaitingApproval(false);
+          setPendingApproval(null);
+          setStreaming(false);
+          if (targetConvId) {
+            await loadMessages(targetConvId);
+          }
+          return;
+        }
+
+        // If approval was approved and ready to resume:
+        if (
+          run.status === "APPROVAL_PENDING" &&
+          approval &&
+          (approval.status === "APPROVED" || approval.status === "EDIT_APPROVED") &&
+          !resumeInProgressRef.current
+        ) {
+          clearInterval(interval);
+          setIsAwaitingApproval(false);
+          await resumeWorkflow(run.id, approval.id, targetConvId);
+        }
+      } catch {}
+    }, 2500);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [isAwaitingApproval, currentRunId, streaming, activeConversation, loadMessages, resumeWorkflow]);
 
   // Create New Chat
   const handleNewChat = useCallback(async () => {
@@ -564,6 +961,7 @@ export default function CopilotPage() {
       const data = await res.json();
       const newConv: Conversation = data.conversation;
 
+      activeConversationIdRef.current = newConv.id;
       setConversations((prev) => [newConv, ...prev]);
       setActiveConversation(newConv);
       setMessages([]);
@@ -572,26 +970,43 @@ export default function CopilotPage() {
       setIsRefused(false);
       setPendingApproval(null);
       setIsAwaitingApproval(false);
+      setCheckingApproval(false);
       setSelectedCitation(null);
 
       const url = new URL(window.location.href);
       url.searchParams.set("conversationId", newConv.id);
       window.history.pushState({}, "", url.toString());
     } catch (err: any) {
-      alert(`Error creating chat: ${err.message}`);
+      toast({
+        title: "Chat Creation Failed",
+        description: "Failed to create new chat conversation.",
+        variant: "destructive",
+      });
     }
   }, []);
 
-  // Delete Conversation
-  const handleDeleteConversation = useCallback(async (e: React.MouseEvent, convId: string) => {
+  // Delete Conversation Flow (via shadcn/ui AlertDialog)
+  const handleRequestDeleteConversation = useCallback((e: React.MouseEvent, convId: string) => {
     e.stopPropagation();
-    if (!confirm("Are you sure you want to delete this chat history?")) return;
+    setConversationToDelete(convId);
+  }, []);
+
+  const handleConfirmDeleteConversation = useCallback(async () => {
+    if (!conversationToDelete || isDeletingConversation) return;
+
+    const convId = conversationToDelete;
+    setIsDeletingConversation(true);
 
     try {
       const res = await fetch(`/api/conversations/${convId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete chat");
 
       setConversations((prev) => prev.filter((c) => c.id !== convId));
+      setConversationToDelete(null);
+      toast({
+        title: "Chat Deleted",
+        description: "Chat history deleted successfully.",
+      });
 
       if (activeConversation?.id === convId) {
         const remaining = conversations.filter((c) => c.id !== convId);
@@ -606,9 +1021,15 @@ export default function CopilotPage() {
         }
       }
     } catch (err: any) {
-      alert(`Delete failed: ${err.message}`);
+      toast({
+        title: "Delete Failed",
+        description: "Failed to delete chat history.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeletingConversation(false);
     }
-  }, [activeConversation, conversations, selectConversation]);
+  }, [conversationToDelete, isDeletingConversation, activeConversation, conversations, selectConversation]);
 
   // Initial Boot & URL Rehydration
   useEffect(() => {
@@ -627,7 +1048,19 @@ export default function CopilotPage() {
         setConversations(convList);
 
         const params = new URLSearchParams(window.location.search);
-        const urlConvId = params.get("conversationId");
+        let urlConvId = params.get("conversationId");
+        const urlRunId = params.get("runId");
+
+        // If runId is present without conversationId, recover conversationId from the run
+        if (!urlConvId && urlRunId) {
+          try {
+            const rRes = await fetch(`/api/runs/${encodeURIComponent(urlRunId)}`);
+            if (rRes.ok) {
+              const rData = await rRes.json();
+              urlConvId = rData.conversationId || rData.run?.sessionId || null;
+            }
+          } catch {}
+        }
 
         if (urlConvId) {
           const match = convList.find((c) => c.id === urlConvId);
@@ -638,13 +1071,15 @@ export default function CopilotPage() {
             const singleRes = await fetch(`/api/conversations/${urlConvId}`);
             if (singleRes.ok) {
               const singleData = await singleRes.json();
+              activeConversationIdRef.current = urlConvId;
               setActiveConversation(singleData.conversation);
               loadMessages(urlConvId);
-            } else if (convList.length > 0) {
+              checkConversationApproval(urlConvId);
+            } else if (!urlRunId && convList.length > 0) {
               selectConversation(convList[0]);
             }
           }
-        } else if (convList.length > 0) {
+        } else if (!urlRunId && convList.length > 0) {
           selectConversation(convList[0]);
         }
       } catch (err: any) {
@@ -655,13 +1090,14 @@ export default function CopilotPage() {
     }
 
     init();
-  }, [loadMessages, selectConversation]);
+  }, [loadMessages, selectConversation, checkConversationApproval]);
 
   // Submit Query in Active Conversation
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!query.trim() || streaming) return;
+    if (!query.trim() || streaming || submitting) return;
 
+    setSubmitting(true);
     let targetConv = activeConversation;
 
     // If no active conversation, create one automatically
@@ -678,12 +1114,20 @@ export default function CopilotPage() {
         setConversations((prev) => [targetConv!, ...prev]);
         setActiveConversation(targetConv);
       } catch (err: any) {
-        alert(`Error initiating chat: ${err.message}`);
+        toast({
+          title: "Chat Failed",
+          description: "Failed to initiate chat. Please try again.",
+          variant: "destructive",
+        });
+        setSubmitting(false);
         return;
       }
     }
 
-    if (!targetConv) return;
+    if (!targetConv) {
+      setSubmitting(false);
+      return;
+    }
 
     const currentQuery = query.trim();
     setQuery("");
@@ -697,6 +1141,7 @@ export default function CopilotPage() {
     setIsAwaitingApproval(false);
     setSelectedCitation(null);
     setTwistEvaluation(null);
+    setCurrentStage(getWorkflowStage("Retrieval Engine", "step_start"));
 
     // Reset steps
     setSteps([
@@ -723,7 +1168,11 @@ export default function CopilotPage() {
       setCurrentRunId(runId);
       try {
         localStorage.setItem("copilot_active_run_id", runId);
-        window.history.replaceState(null, "", `/copilot?runId=${encodeURIComponent(runId)}`);
+        window.history.replaceState(
+          null,
+          "",
+          `/copilot?conversationId=${encodeURIComponent(targetConv.id)}&runId=${encodeURIComponent(runId)}`
+        );
       } catch {}
 
       // Optimistically add user message to messages list
@@ -744,9 +1193,11 @@ export default function CopilotPage() {
       // Open SSE Stream to active run
       const sse = new EventSource(`/api/runs/${runId}/stream`);
       eventSourceRef.current = sse;
+      setSubmitting(false);
 
       sse.addEventListener("step_start", (evt: any) => {
         const data = JSON.parse(evt.data);
+        setCurrentStage(getWorkflowStage(data.agent, "step_start"));
         setSteps((prev) =>
           prev.map((s) => {
             const match =
@@ -781,6 +1232,7 @@ export default function CopilotPage() {
 
       sse.addEventListener("refusal", (evt: any) => {
         const data = JSON.parse(evt.data);
+        setCurrentStage(getWorkflowStage("", "refusal"));
         setIsRefused(true);
         setRefusalMessage(data.message);
         setStreaming(false);
@@ -798,6 +1250,7 @@ export default function CopilotPage() {
       // TW-005: Handle twist_evaluation event
       sse.addEventListener("twist_evaluation", (evt: any) => {
         const data = JSON.parse(evt.data);
+        setCurrentStage(getWorkflowStage("Mandatory Twist Guard", "twist_evaluation"));
         if (data.data) {
           setTwistEvaluation(data.data);
         }
@@ -807,6 +1260,7 @@ export default function CopilotPage() {
       sse.addEventListener("approval_required", (evt: any) => {
         const data = JSON.parse(evt.data);
         const approvalData = data.data || data;
+        setCurrentStage(getWorkflowStage("", "approval_required"));
         setPendingApproval({
           approvalId: approvalData.approvalId,
           riskLevel: approvalData.riskLevel || "HIGH",
@@ -829,6 +1283,7 @@ export default function CopilotPage() {
 
       // Run completed successfully: reload persisted messages
       sse.addEventListener("done", async (evt: any) => {
+        setCurrentStage(getWorkflowStage("", "done"));
         setStreaming(false);
         setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" })));
         if (evt?.data) {
@@ -860,6 +1315,7 @@ export default function CopilotPage() {
       });
 
       sse.addEventListener("error", (evt: any) => {
+        setCurrentStage(getWorkflowStage("", "error"));
         setStreaming(false);
         if (evt.data) {
           try {
@@ -883,8 +1339,13 @@ export default function CopilotPage() {
         sse.close();
       };
     } catch (err: any) {
-      alert(`Query failed: ${err.message}`);
+      toast({
+        title: "Query Failed",
+        description: "Failed to execute query. Please try again.",
+        variant: "destructive",
+      });
       setStreaming(false);
+      setSubmitting(false);
       setSteps((prev) =>
         prev.map((s) => (s.status === "running" ? { ...s, status: "completed" } : s))
       );
@@ -919,6 +1380,7 @@ export default function CopilotPage() {
     setAccessDeniedMessage(null);
     setPendingApproval(null);
     setIsAwaitingApproval(false);
+    setInlineApproving(false);
     setTwistEvaluation(null);
     setSteps([
       { agent: "Retrieval Engine (Cross-Lingual AR+EN)", status: "pending" },
@@ -931,6 +1393,58 @@ export default function CopilotPage() {
       localStorage.removeItem("copilot_active_run_id");
       window.history.replaceState(null, "", "/copilot");
     } catch {}
+  };
+
+  const handleInlineApprove = async () => {
+    if (!pendingApproval?.approvalId || inlineApproving || resumeInProgressRef.current) return;
+
+    const approvalId = pendingApproval.approvalId;
+    const runId = currentRunId;
+    const convId = activeConversation?.id;
+
+    setInlineApproving(true);
+
+    try {
+      const res = await fetch(`/api/approvals/${encodeURIComponent(approvalId)}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: "Inline approved from Copilot chat" }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        toast({
+          title: "Approval Failed",
+          description: errData.error || `Approval failed with HTTP ${res.status}`,
+          variant: "destructive",
+        });
+        setInlineApproving(false);
+        return;
+      }
+
+      const data = await res.json().catch(() => ({}));
+      const targetRunId = data.approval?.runId || runId;
+      const targetApprovalId = data.approval?.id || approvalId;
+      const targetConvId = data.conversationId || convId;
+
+      toast({
+        title: "Action Approved",
+        description: "Approval granted. Resuming workflow...",
+        icon: <FiCheckCircle className="w-5 h-5 text-foreground shrink-0" />,
+      });
+
+      if (targetRunId && targetApprovalId) {
+        await resumeWorkflow(targetRunId, targetApprovalId, targetConvId);
+      }
+    } catch (err: any) {
+      toast({
+        title: "Approval Error",
+        description: err.message || "Failed to approve action.",
+        variant: "destructive",
+      });
+    } finally {
+      setInlineApproving(false);
+    }
   };
 
   const handleCopy = (text: string, id?: string) => {
@@ -953,7 +1467,6 @@ export default function CopilotPage() {
         {/* Sidebar Header */}
         <div className="p-3 border-b border-border bg-card flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <AppIcons.copilot className="w-4 h-4 text-sky-600" />
             <span className="text-xs font-bold tracking-tight text-foreground uppercase">
               Recent Chats
             </span>
@@ -1003,7 +1516,8 @@ export default function CopilotPage() {
                   </div>
 
                   <button
-                    onClick={(e) => handleDeleteConversation(e, conv.id)}
+                    type="button"
+                    onClick={(e) => handleRequestDeleteConversation(e, conv.id)}
                     className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-600 transition-opacity rounded hover:bg-white"
                     title="Delete Chat"
                   >
@@ -1023,9 +1537,7 @@ export default function CopilotPage() {
         {/* Workspace Top Header */}
         <div className="p-3.5 px-5 border-b border-border bg-card flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-sky-100 text-sky-700 border border-sky-200 flex items-center justify-center shrink-0">
-              <AppIcons.copilot className="w-3.5 h-3.5" />
-            </div>
+            <LuBot className="w-4 h-4 text-foreground shrink-0" />
             <div className="min-w-0">
               <h2 className="text-xs font-bold text-foreground truncate tracking-tight">
                 {activeConversation?.title || "Copilot Grounded Workspace"}
@@ -1087,19 +1599,17 @@ export default function CopilotPage() {
             </Card>
           )}
 
-          {loadingMessages ? (
+          {loadingMessages || checkingApproval ? (
             <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground animate-pulse">
-              Loading chat messages...
+              Loading chat messages and workflow state...
             </div>
           ) : messages.length === 0 && streamedText.length === 0 && !isRefused && !isAwaitingApproval && !accessDeniedMessage ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center py-12 px-4 select-none">
-              <div className="w-12 h-12 rounded-2xl bg-sky-100 text-sky-600 border border-sky-200 flex items-center justify-center mb-3 shadow-xs">
-                <AppIcons.copilot className="w-6 h-6" />
-              </div>
-              <h3 className="text-sm font-semibold text-slate-800 tracking-tight">
+              <LuBot className="w-8 h-8 text-foreground/70 mb-3" />
+              <h3 className="text-sm font-semibold text-foreground tracking-tight">
                 Ask a clinical protocol question
               </h3>
-              <p className="text-xs text-muted-foreground max-w-sm mt-1 leading-relaxed">
+              <p className="text-xs text-muted-foreground max-w-sm mt-1.5 leading-relaxed">
                 Queries are processed through hybrid retrieval, verified by specialist agents, and persisted to this conversation.
               </p>
             </div>
@@ -1126,9 +1636,9 @@ export default function CopilotPage() {
               return (
                 <div key={msg.id} className="flex justify-start">
                   <div className="max-w-[90%] bg-card border border-slate-200 rounded-2xl rounded-tl-xs p-4 shadow-2xs space-y-3">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-800">
-                        <AppIcons.copilot className="w-3.5 h-3.5 text-sky-600" />
+                    <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
+                        <LuBot className="w-3.5 h-3.5 text-foreground/80" />
                         <span>Domain Copilot</span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -1186,26 +1696,126 @@ export default function CopilotPage() {
             })
           )}
 
-          {/* Active Live Stream Card */}
-          {streaming && (
+          {/* Active Live Workflow Card with Dynamic Marker */}
+          {(streaming || (isAwaitingApproval && pendingApproval) || isRefused) && (
             <div className="flex justify-start">
-              <div className="max-w-[90%] bg-card border border-sky-300 rounded-2xl rounded-tl-xs p-4 shadow-xs space-y-3 ring-2 ring-sky-100">
-                <div className="flex items-center justify-between border-b border-sky-100 pb-2">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-800 animate-pulse">
-                    <AppIcons.activity className="w-3.5 h-3.5 text-sky-600" />
-                    <span>Generating Grounded Protocol Synthesis...</span>
+              <div className="w-full max-w-2xl border border-border bg-transparent rounded-md p-4 space-y-3 shadow-none">
+                {/* 1. Dynamic Status Marker with Border Variant */}
+                <Marker variant="border" size="lg" role="status" className="w-full justify-start gap-2">
+                  <MarkerIcon>
+                    <currentStage.icon
+                      className={cn(
+                        "w-3.5 h-3.5 shrink-0",
+                        currentStage.id === "hitl"
+                          ? "text-amber-600"
+                          : currentStage.id === "refusal" || currentStage.id === "error"
+                          ? "text-destructive"
+                          : "text-muted-foreground"
+                      )}
+                      aria-hidden="true"
+                    />
+                  </MarkerIcon>
+                  <MarkerContent className={cn("text-sm font-medium text-foreground", currentStage.shimmer && "shimmer")}>
+                    {currentStage.label}
+                  </MarkerContent>
+                </Marker>
+
+                {/* 2. Content Body based on State */}
+                {isRefused ? (
+                  <p className="text-xs text-destructive leading-normal font-sans">{refusalMessage}</p>
+                ) : isAwaitingApproval && pendingApproval ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-amber-900 leading-normal font-medium">{pendingApproval.proposedAction}</p>
+
+                    {pendingApproval.riskFlags.length > 0 && (
+                      <div className="space-y-1.5">
+                        {pendingApproval.riskFlags.map((flag, i) => (
+                          <div
+                            key={i}
+                            className={`px-2.5 py-1.5 rounded text-[11px] font-mono border ${
+                              flag.severity === "CRITICAL"
+                                ? "bg-rose-100/60 border-rose-200 text-rose-800"
+                                : flag.severity === "HIGH"
+                                ? "bg-amber-100/60 border-amber-200 text-amber-900"
+                                : "bg-sky-100/60 border-sky-200 text-sky-800"
+                            }`}
+                          >
+                            <span className="font-bold">{flag.severity}:</span> {flag.riskType} — {flag.detail}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-3 pt-1">
+                      {pendingApproval.status === "APPROVED" || pendingApproval.status === "EDIT_APPROVED" ? (
+                        <Button
+                          size="sm"
+                          className="bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5 text-xs shadow-xs"
+                          onClick={() => {
+                            if (currentRunId && pendingApproval.approvalId) {
+                              resumeWorkflow(currentRunId, pendingApproval.approvalId, activeConversation?.id);
+                            }
+                          }}
+                        >
+                          <AppIcons.success className="w-3.5 h-3.5" />
+                          Resume Workflow Now
+                          <AppIcons.arrowRight className="w-3 h-3" />
+                        </Button>
+                      ) : (
+                        <>
+                          {canApprove && (
+                            <Button
+                              size="sm"
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5 text-xs shadow-xs font-semibold"
+                              onClick={handleInlineApprove}
+                              disabled={inlineApproving || streaming}
+                            >
+                              {inlineApproving ? (
+                                <AppIcons.loading className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <AppIcons.success className="w-3.5 h-3.5" />
+                              )}
+                              <span>{inlineApproving ? "Approving & Resuming..." : "Approve & Continue"}</span>
+                              {!inlineApproving && <AppIcons.arrowRight className="w-3 h-3" />}
+                            </Button>
+                          )}
+
+                          <Button
+                            size="sm"
+                            variant={canApprove ? "outline" : "default"}
+                            className={
+                              canApprove
+                                ? "text-amber-900 border-amber-300 hover:bg-amber-100/70 gap-1.5 text-xs shadow-xs font-medium"
+                                : "bg-amber-600 hover:bg-amber-500 text-white gap-1.5 text-xs shadow-xs"
+                            }
+                            asChild
+                          >
+                            <Link href="/reviews">
+                              <AppIcons.warning className={`w-3.5 h-3.5 ${canApprove ? "text-amber-700" : ""}`} />
+                              Review in HITL Queue
+                              <AppIcons.arrowRight className="w-3 h-3" />
+                            </Link>
+                          </Button>
+                        </>
+                      )}
+                      <span className="text-[10px] font-mono text-amber-700 flex items-center gap-1 ml-auto">
+                        <AppIcons.pending className="w-3 h-3" />
+                        Approval ID: {pendingApproval.approvalId}
+                      </span>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  streamedText && (
+                    <div className="prose prose-slate max-w-none text-xs text-foreground/90 leading-relaxed whitespace-pre-wrap" dir="auto">
+                      {streamedText}
+                      <span className="inline-block w-1.5 h-3.5 bg-primary/60 ml-1 animate-pulse align-middle" />
+                    </div>
+                  )
+                )}
 
-                <div className="prose prose-slate max-w-none text-xs text-slate-800 leading-relaxed whitespace-pre-wrap" dir="auto">
-                  {streamedText || (
-                    <span className="text-muted-foreground italic">Consulting domain specialists and evidence...</span>
-                  )}
-                  <span className="inline-block w-1.5 h-3.5 bg-sky-600 ml-1 animate-pulse align-middle" />
-                </div>
-
+                {/* 3. Incoming Citations (beneath the Marker) */}
                 {streamCitations.length > 0 && (
-                  <div className="pt-2 border-t border-slate-100">
+                  <div className="pt-2 border-t border-border">
                     <p className="text-[10px] font-mono text-muted-foreground mb-1.5 font-semibold">
                       INCOMING CITATIONS ({streamCitations.length}):
                     </p>
@@ -1213,11 +1823,12 @@ export default function CopilotPage() {
                       {streamCitations.map((c, i) => (
                         <button
                           key={c.citationId || i}
+                          type="button"
                           onClick={() => setSelectedCitation(c)}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-50 hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-[10px] font-mono text-sky-800 transition-colors shadow-2xs"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted/50 hover:bg-muted border border-border text-[10px] font-mono text-foreground transition-colors"
                         >
                           <span>[{c.documentName}, p.{c.page || 1}]</span>
-                          <AppIcons.external className="w-2 h-2 text-slate-400" />
+                          <AppIcons.external className="w-2 h-2 text-muted-foreground" />
                         </button>
                       ))}
                     </div>
@@ -1227,94 +1838,24 @@ export default function CopilotPage() {
             </div>
           )}
 
-          {/* Low Evidence Refusal Banner */}
-          {isRefused && (
-            <Card className="border-rose-200 bg-rose-50/50 p-4 shadow-xs">
-              <div className="flex items-center gap-2 font-semibold text-rose-800 text-xs">
-                <AppIcons.warning className="w-4 h-4 text-rose-600" />
-                <span>Low-Evidence Refusal Triggered</span>
-              </div>
-              <p className="text-xs text-rose-700 mt-1 leading-normal">{refusalMessage}</p>
-            </Card>
-          )}
-
-          {/* HITL Approval Banner */}
-          {isAwaitingApproval && pendingApproval && (
-            <Card className="border-amber-200 bg-amber-50/60 p-4 shadow-xs space-y-3">
-              <div className="flex items-center gap-2 font-semibold text-amber-900 text-xs">
-                <AppIcons.warning className="w-4 h-4 text-amber-600" />
-                <span>
-                  {pendingApproval.status === "APPROVED" || pendingApproval.status === "EDIT_APPROVED"
-                    ? "Workflow Approved: Ready to Resume"
-                    : "Workflow Paused: Human Approval Required"}
-                </span>
-              </div>
-              <p className="text-xs text-amber-800 leading-normal">{pendingApproval.proposedAction}</p>
-
-              {pendingApproval.riskFlags.length > 0 && (
-                <div className="space-y-1.5">
-                  {pendingApproval.riskFlags.map((flag, i) => (
-                    <div
-                      key={i}
-                      className={`px-2.5 py-1.5 rounded text-[11px] font-mono border ${
-                        flag.severity === "CRITICAL"
-                          ? "bg-rose-100/60 border-rose-200 text-rose-800"
-                          : flag.severity === "HIGH"
-                          ? "bg-amber-100/60 border-amber-200 text-amber-900"
-                          : "bg-sky-100/60 border-sky-200 text-sky-800"
-                      }`}
-                    >
-                      <span className="font-bold">{flag.severity}:</span> {flag.riskType} — {flag.detail}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex items-center gap-3 pt-1">
-                {pendingApproval.status === "APPROVED" || pendingApproval.status === "EDIT_APPROVED" ? (
-                  <Button
-                    size="sm"
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5 text-xs shadow-xs"
-                    onClick={() => {
-                      if (currentRunId && pendingApproval.approvalId) {
-                        resumeWorkflow(currentRunId, pendingApproval.approvalId);
-                      }
-                    }}
-                  >
-                    <AppIcons.success className="w-3.5 h-3.5" />
-                    Resume Workflow Now
-                    <AppIcons.arrowRight className="w-3 h-3" />
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    className="bg-amber-600 hover:bg-amber-500 text-white gap-1.5 text-xs shadow-xs"
-                    asChild
-                  >
-                    <Link href="/reviews">
-                      <AppIcons.warning className="w-3.5 h-3.5" />
-                      Review in HITL Queue
-                      <AppIcons.arrowRight className="w-3 h-3" />
-                    </Link>
-                  </Button>
-                )}
-                <span className="text-[10px] font-mono text-amber-700 flex items-center gap-1">
-                  <AppIcons.pending className="w-3 h-3" />
-                  Approval ID: {pendingApproval.approvalId}
-                </span>
-              </div>
-            </Card>
-          )}
-
           <div ref={messagesEndRef} />
         </div>
 
         {/* Live Progress Rail (when streaming) */}
         {streaming && (
-          <div className="px-5 py-2 border-t border-border bg-slate-50">
+          <div className="px-5 py-2 border-t border-border bg-muted/20">
             <div className="flex items-center justify-between text-[11px] font-mono mb-1.5">
               <span className="text-muted-foreground font-semibold">LIVE AGENT PIPELINE:</span>
-              <span className="text-sky-600 font-semibold animate-pulse">Running...</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sky-600 font-semibold animate-pulse">Running...</span>
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="text-[10px] text-destructive hover:text-destructive/80 font-mono px-1.5 py-0.5 rounded border border-destructive/20 hover:bg-destructive/10 transition-colors"
+                >
+                  Stop
+                </button>
+              </div>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {steps.map((step, idx) => (
@@ -1342,44 +1883,45 @@ export default function CopilotPage() {
         )}
 
         {/* Question Composer Form */}
-        <form onSubmit={handleSubmit} className="p-3.5 px-4 border-t border-border bg-card">
-          <div className="flex gap-2">
+        <div className="p-3.5 px-4 border-t border-border bg-card">
+          <form
+            onSubmit={handleSubmit}
+            className="rounded-xl border border-border bg-background shadow-2xs transition-all focus-within:border-foreground/30 focus-within:ring-1 focus-within:ring-foreground/10 p-2.5 flex flex-col justify-between"
+          >
             <textarea
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  handleSubmit();
+                  if (!submitting && !streaming && query.trim()) {
+                    handleSubmit();
+                  }
                 }
               }}
               dir="auto"
               rows={2}
+              disabled={submitting}
               placeholder="Ask a question grounded in the clinical protocol corpus (English or Arabic)..."
-              className="flex-1 bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 resize-none font-sans"
+              className="w-full bg-transparent border-0 outline-none text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0 resize-none font-sans leading-relaxed min-h-[44px]"
             />
-            {streaming ? (
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={handleCancel}
-                className="gap-1.5 text-xs font-semibold shrink-0 h-auto"
-              >
-                <AppIcons.stop className="w-3.5 h-3.5 fill-current" />
-                Cancel
-              </Button>
-            ) : (
+            <div className="flex items-center justify-end pt-1">
               <Button
                 type="submit"
-                disabled={!query.trim()}
-                className="gap-1.5 text-xs font-semibold shrink-0 h-auto px-4 shadow-xs"
+                size="icon"
+                disabled={!query.trim() || submitting || streaming}
+                className="h-7 w-7 rounded-full shrink-0 transition-opacity flex items-center justify-center shadow-xs"
+                aria-label={submitting ? "Sending message" : "Send message"}
               >
-                <AppIcons.send className="w-3.5 h-3.5" />
-                Send
+                {submitting ? (
+                  <LuLoaderCircle className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <LuArrowUp className="w-3.5 h-3.5" />
+                )}
               </Button>
-            )}
-          </div>
-        </form>
+            </div>
+          </form>
+        </div>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════ */}
@@ -1432,6 +1974,40 @@ export default function CopilotPage() {
           </div>
         </div>
       )}
+
+      {/* Delete Chat Confirmation Dialog */}
+      <AlertDialog
+        open={!!conversationToDelete}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingConversation) {
+            setConversationToDelete(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete chat history?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this chat history? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingConversation}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleConfirmDeleteConversation();
+              }}
+              disabled={isDeletingConversation}
+              className={cn(buttonVariants({ variant: "destructive" }))}
+            >
+              {isDeletingConversation ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
