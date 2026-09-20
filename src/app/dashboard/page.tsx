@@ -14,49 +14,86 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { toast } from "@/components/ui/use-toast";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function DashboardPage() {
   const [documents, setDocuments] = useState<any[]>([]);
   const [jobs, setJobs] = useState<any[]>([]);
   const [totalChunks, setTotalChunks] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
   const [docChunks, setDocChunks] = useState<any[]>([]);
 
-  const fetchCorpus = async () => {
+  const [error, setError] = useState<string | null>(null);
+
+  const getAuthHeaders = (): Record<string, string> => {
     try {
-      setLoading(true);
-      const res = await fetch("/api/documents");
-      const data = await res.json();
+      const token = typeof window !== "undefined" ? localStorage.getItem("dc_token") : null;
+      if (token) return { Authorization: `Bearer ${token}` };
+    } catch {}
+    return {};
+  };
+
+  const fetchDocumentsWithAuth = async (retryCount = 0): Promise<any> => {
+    const res = await fetch("/api/documents", {
+      headers: getAuthHeaders(),
+    });
+
+    if (res.ok) {
+      return await res.json();
+    }
+
+    // Bounded retry for 401 authentication readiness race on initial mount
+    if (res.status === 401 && retryCount < 1) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return fetchDocumentsWithAuth(retryCount + 1);
+    }
+
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData?.error || `Failed to load documents (HTTP ${res.status})`);
+  };
+
+  const fetchCorpus = async (isManualRefresh = false) => {
+    try {
+      if (isManualRefresh) {
+        setRefreshing(true);
+      }
+      const data = await fetchDocumentsWithAuth();
       setDocuments(data.documents || []);
       setJobs(data.jobs || []);
       setTotalChunks(data.totalChunksIndexed || 0);
-    } catch (err) {
-      console.error("Failed to fetch documents", err);
+      setError(null);
+    } catch (err: any) {
+      console.error("Dashboard documents load error:", err?.message || err);
+      setError(err?.message || "Failed to load documents");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    fetchCorpus();
-    const timer = window.setInterval(fetchCorpus, 4000);
+    fetchCorpus(false);
+    const timer = window.setInterval(() => fetchCorpus(false), 4000);
     return () => window.clearInterval(timer);
   }, []);
 
   const retryDocument = async (doc: any) => {
     try {
-      const res = await fetch(`/api/documents/${doc.id}/reingest`, { method: "POST" });
+      const res = await fetch(`/api/documents/${doc.id}/reingest`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || "Retry failed");
       }
-      await fetchCorpus();
+      await fetchCorpus(false);
       toast({
         title: "Pipeline Retried",
         description: "Processing pipeline retried successfully.",
-        variant: "success",
       });
     } catch (error: any) {
       toast({
@@ -78,15 +115,15 @@ export default function DashboardPage() {
 
       const res = await fetch("/api/documents", {
         method: "POST",
+        headers: getAuthHeaders(),
         body: formData,
       });
 
       if (res.ok) {
-        await fetchCorpus();
+        await fetchCorpus(false);
         toast({
           title: "Upload Successful",
           description: "Document uploaded successfully.",
-          variant: "success",
         });
       } else {
         toast({
@@ -109,7 +146,9 @@ export default function DashboardPage() {
   const inspectDoc = async (doc: any) => {
     setSelectedDoc(doc);
     try {
-      const res = await fetch(`/api/documents/${doc.id}`);
+      const res = await fetch(`/api/documents/${doc.id}`, {
+        headers: getAuthHeaders(),
+      });
       const data = await res.json();
       setDocChunks(data.chunks || []);
     } catch (err) {
@@ -150,10 +189,10 @@ export default function DashboardPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={fetchCorpus}
+              onClick={() => fetchCorpus(true)}
               className="gap-1.5 text-xs text-slate-700"
             >
-              <AppIcons.refresh className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              <AppIcons.refresh className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
               Refresh
             </Button>
             <label className="inline-flex">
@@ -181,54 +220,125 @@ export default function DashboardPage() {
 
       {/* KPI Summary Strip */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Card className="shadow-xs p-4">
-          <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
-            <span className="font-medium">Documents</span>
-            <AppIcons.documents className="w-4 h-4 text-sky-600" />
-          </div>
-          <p className="text-2xl font-bold font-mono text-foreground">{documents.length}</p>
-          <p className="text-[10px] text-muted-foreground mt-1">Corpus inventory</p>
-        </Card>
+        {loading ? (
+          <>
+            <Card className="shadow-xs p-4">
+              <div className="flex items-center justify-between mb-1">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-4 rounded" />
+              </div>
+              <div className="h-8 flex items-center">
+                <Skeleton className="h-7 w-12" />
+              </div>
+              <div className="mt-1">
+                <Skeleton className="h-3.5 w-24" />
+              </div>
+            </Card>
 
-        <Card className="shadow-xs p-4">
-          <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
-            <span className="font-medium">Total Pages</span>
-            <AppIcons.pages className="w-4 h-4 text-indigo-600" />
-          </div>
-          <p className="text-2xl font-bold font-mono text-foreground">{totalPages}</p>
-          <p className="text-[10px] text-muted-foreground mt-1">Clinical guideline pages</p>
-        </Card>
+            <Card className="shadow-xs p-4">
+              <div className="flex items-center justify-between mb-1">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-4 rounded" />
+              </div>
+              <div className="h-8 flex items-center">
+                <Skeleton className="h-7 w-12" />
+              </div>
+              <div className="mt-1">
+                <Skeleton className="h-3.5 w-32" />
+              </div>
+            </Card>
 
-        <Card className="shadow-xs p-4">
-          <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
-            <span className="font-medium">Indexed Chunks</span>
-            <AppIcons.chunks className="w-4 h-4 text-emerald-600" />
-          </div>
-          <p className="text-2xl font-bold font-mono text-emerald-600">{totalChunks}</p>
-          <p className="text-[10px] text-emerald-700/80 mt-1">1536d pgvector ready</p>
-        </Card>
+            <Card className="shadow-xs p-4">
+              <div className="flex items-center justify-between mb-1">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-4 rounded" />
+              </div>
+              <div className="h-8 flex items-center">
+                <Skeleton className="h-7 w-12" />
+              </div>
+              <div className="mt-1">
+                <Skeleton className="h-3.5 w-28" />
+              </div>
+            </Card>
 
-        <Card className="shadow-xs p-4">
-          <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
-            <span className="font-medium">Pipeline Failures</span>
-            <AppIcons.failures className={`w-4 h-4 ${failureCount > 0 ? "text-rose-500" : "text-slate-400"}`} />
-          </div>
-          <p className={`text-2xl font-bold font-mono ${failureCount > 0 ? "text-rose-600" : "text-foreground"}`}>
-            {failureCount}
-          </p>
-          <p className="text-[10px] text-muted-foreground mt-1">Zero unhandled errors</p>
-        </Card>
+            <Card className="shadow-xs p-4">
+              <div className="flex items-center justify-between mb-1">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-4 rounded" />
+              </div>
+              <div className="h-8 flex items-center">
+                <Skeleton className="h-7 w-8" />
+              </div>
+              <div className="mt-1">
+                <Skeleton className="h-3.5 w-28" />
+              </div>
+            </Card>
 
-        <Card className="shadow-xs p-4 col-span-2 md:col-span-1">
-          <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
-            <span className="font-medium">Last Ingest</span>
-            <AppIcons.pending className="w-4 h-4 text-purple-600" />
-          </div>
-          <p className="text-xs font-mono text-foreground mt-2 truncate font-medium">
-            {documents.length > 0 ? new Date(documents[0].createdAt).toLocaleTimeString() : "None"}
-          </p>
-          <p className="text-[10px] text-muted-foreground mt-1">Live updates active</p>
-        </Card>
+            <Card className="shadow-xs p-4 col-span-2 md:col-span-1">
+              <div className="flex items-center justify-between mb-1">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-4 rounded" />
+              </div>
+              <div className="h-8 flex items-center mt-2">
+                <Skeleton className="h-4 w-24" />
+              </div>
+              <div className="mt-1">
+                <Skeleton className="h-3.5 w-24" />
+              </div>
+            </Card>
+          </>
+        ) : (
+          <>
+            <Card className="shadow-xs p-4">
+              <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
+                <span className="font-medium">Documents</span>
+                <AppIcons.documents className="w-4 h-4 text-sky-600" />
+              </div>
+              <p className="text-2xl font-bold font-mono text-foreground">{documents.length}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">Corpus inventory</p>
+            </Card>
+
+            <Card className="shadow-xs p-4">
+              <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
+                <span className="font-medium">Total Pages</span>
+                <AppIcons.pages className="w-4 h-4 text-indigo-600" />
+              </div>
+              <p className="text-2xl font-bold font-mono text-foreground">{totalPages}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">Clinical guideline pages</p>
+            </Card>
+
+            <Card className="shadow-xs p-4">
+              <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
+                <span className="font-medium">Indexed Chunks</span>
+                <AppIcons.chunks className="w-4 h-4 text-emerald-600" />
+              </div>
+              <p className="text-2xl font-bold font-mono text-emerald-600">{totalChunks}</p>
+              <p className="text-[10px] text-emerald-700/80 mt-1">1536d pgvector ready</p>
+            </Card>
+
+            <Card className="shadow-xs p-4">
+              <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
+                <span className="font-medium">Pipeline Failures</span>
+                <AppIcons.failures className={`w-4 h-4 ${failureCount > 0 ? "text-rose-500" : "text-slate-400"}`} />
+              </div>
+              <p className={`text-2xl font-bold font-mono ${failureCount > 0 ? "text-rose-600" : "text-foreground"}`}>
+                {failureCount}
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-1">Zero unhandled errors</p>
+            </Card>
+
+            <Card className="shadow-xs p-4 col-span-2 md:col-span-1">
+              <div className="flex items-center justify-between text-muted-foreground text-xs mb-1">
+                <span className="font-medium">Last Ingest</span>
+                <AppIcons.pending className="w-4 h-4 text-purple-600" />
+              </div>
+              <p className="text-xs font-mono text-foreground mt-2 truncate font-medium">
+                {documents.length > 0 ? new Date(documents[0].createdAt).toLocaleTimeString() : "None"}
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-1">Live updates active</p>
+            </Card>
+          </>
+        )}
       </div>
 
       {/* 5-Stage Ingestion Pipeline Board */}
@@ -237,36 +347,68 @@ export default function DashboardPage() {
           <CardTitle className="text-sm font-semibold text-foreground">
             5-Stage Ingestion Pipeline Board
           </CardTitle>
-          <Badge variant="success" className="gap-1.5 font-mono text-[10px] py-0.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            PIPELINE READY
-          </Badge>
+          {loading ? (
+            <Skeleton className="h-5 w-28 rounded-full" />
+          ) : (
+            <Badge variant="success" className="gap-1.5 font-mono text-[10px] py-0.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              PIPELINE READY
+            </Badge>
+          )}
         </CardHeader>
         <CardContent className="p-4 pt-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
-            {[
-              { stage: "Extract", desc: "PDF / DOCX / TXT text extraction", count: documents.length },
-              { stage: "Clean", desc: "Boilerplate & header scrubbing", count: documents.length },
-              { stage: "Chunk", desc: "Structure-aware & clause offsets", count: totalChunks },
-              { stage: "Embed", desc: "gemini-embedding-001 (1536d)", count: totalChunks },
-              { stage: "Index", desc: "pgvector similarity index", count: totalChunks },
-            ].map((item, idx) => (
-              <div
-                key={item.stage}
-                className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 relative overflow-hidden"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-mono font-semibold text-sky-600">0{idx + 1}</span>
-                  <AppIcons.success className="w-3.5 h-3.5 text-emerald-600" />
-                </div>
-                <h4 className="text-sm font-bold text-slate-800">{item.stage}</h4>
-                <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">{item.desc}</p>
-                <div className="mt-3 pt-2 border-t border-slate-200/80 flex items-center justify-between text-xs font-mono">
-                  <span className="text-slate-400">Processed:</span>
-                  <span className="text-slate-700 font-semibold">{item.count}</span>
-                </div>
-              </div>
-            ))}
+            {loading
+              ? [
+                  { stage: "01", name: "Extract" },
+                  { stage: "02", name: "Clean" },
+                  { stage: "03", name: "Chunk" },
+                  { stage: "04", name: "Embed" },
+                  { stage: "05", name: "Index" },
+                ].map((item) => (
+                  <div
+                    key={item.stage}
+                    className="p-3.5 rounded-lg bg-slate-50 dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 relative overflow-hidden flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-mono font-semibold text-sky-600/70">{item.stage}</span>
+                        <Skeleton className="w-3.5 h-3.5 rounded" />
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-800 dark:text-neutral-200">{item.name}</h4>
+                      <div className="mt-1 space-y-1">
+                        <Skeleton className="h-3 w-full" />
+                        <Skeleton className="h-3 w-3/4" />
+                      </div>
+                    </div>
+                    <div className="mt-3 pt-2 border-t border-slate-200/80 dark:border-neutral-800 flex items-center justify-between text-xs font-mono">
+                      <span className="text-slate-400">Processed:</span>
+                      <Skeleton className="h-4 w-8" />
+                    </div>
+                  </div>
+                ))
+              : [
+                  { stage: "Extract", desc: "PDF / DOCX / TXT text extraction", count: documents.length },
+                  { stage: "Clean", desc: "Boilerplate & header scrubbing", count: documents.length },
+                  { stage: "Chunk", desc: "Structure-aware & clause offsets", count: totalChunks },
+                  { stage: "Embed", desc: "gemini-embedding-001 (1536d)", count: totalChunks },
+                  { stage: "Index", desc: "pgvector similarity index", count: totalChunks },
+                ].map((item, idx) => (
+                  <div
+                    key={item.stage}
+                    className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 relative overflow-hidden"
+                  >
+                    <div className="mb-1">
+                      <span className="text-xs font-mono font-semibold text-sky-600">0{idx + 1}</span>
+                    </div>
+                    <h4 className="text-sm font-bold text-slate-800">{item.stage}</h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">{item.desc}</p>
+                    <div className="mt-3 pt-2 border-t border-slate-200/80 flex items-center justify-between text-xs font-mono">
+                      <span className="text-slate-400">Processed:</span>
+                      <span className="text-slate-700 font-semibold">{item.count}</span>
+                    </div>
+                  </div>
+                ))}
           </div>
         </CardContent>
       </Card>
@@ -278,13 +420,64 @@ export default function DashboardPage() {
             <CardTitle className="text-sm font-semibold text-foreground">
               Corpus Document Inventory
             </CardTitle>
-            <Badge variant="secondary" className="font-mono text-[10px]">
-              {documents.length} items
-            </Badge>
+            {loading ? (
+              <Skeleton className="h-4 w-14 rounded" />
+            ) : (
+              <Badge variant="secondary" className="font-mono text-[10px]">
+                {documents.length} items
+              </Badge>
+            )}
           </div>
         </CardHeader>
 
-        {documents.length === 0 ? (
+        {loading ? (
+          <Table>
+            <TableHeader className="bg-slate-50">
+              <TableRow>
+                <TableHead className="py-3 px-4 font-mono text-[11px] uppercase">Document Name</TableHead>
+                <TableHead className="py-3 px-4 font-mono text-[11px] uppercase">MIME / Format</TableHead>
+                <TableHead className="py-3 px-4 font-mono text-[11px] uppercase">Size</TableHead>
+                <TableHead className="py-3 px-4 font-mono text-[11px] uppercase">Pipeline Status</TableHead>
+                <TableHead className="py-3 px-4 font-mono text-[11px] uppercase">Ingested At</TableHead>
+                <TableHead className="py-3 px-4 text-right font-mono text-[11px] uppercase">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Array.from({ length: 5 }).map((_, idx) => (
+                <TableRow key={`skeleton-row-${idx}`}>
+                  <TableCell className="py-3 px-4">
+                    <div className="flex items-center gap-2">
+                      <Skeleton className="w-4 h-4 rounded shrink-0" />
+                      <Skeleton className="h-4 w-48" />
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-3 px-4">
+                    <Skeleton className="h-4 w-28" />
+                  </TableCell>
+                  <TableCell className="py-3 px-4">
+                    <Skeleton className="h-4 w-16" />
+                  </TableCell>
+                  <TableCell className="py-3 px-4">
+                    <Skeleton className="h-5 w-20 rounded-md" />
+                  </TableCell>
+                  <TableCell className="py-3 px-4">
+                    <Skeleton className="h-4 w-32" />
+                  </TableCell>
+                  <TableCell className="py-3 px-4 text-right">
+                    <div className="flex justify-end">
+                      <Skeleton className="h-7 w-24 rounded-md" />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : error ? (
+          <div className="p-8 text-center bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
+            <p className="text-sm font-semibold">Failed to Load Corpus Documents</p>
+            <p className="text-xs text-muted-foreground mt-1">{error}</p>
+          </div>
+        ) : documents.length === 0 ? (
           <div className="p-12 text-center text-muted-foreground">
             <AppIcons.corpus className="w-8 h-8 mx-auto mb-2 opacity-40 text-sky-600" />
             <p className="text-sm font-medium">No documents in corpus</p>
