@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { toast, useToast } from "@/components/ui/use-toast";
 import { FiCheckCircle } from "react-icons/fi";
+import { LuBot, LuArrowUp, LuLoaderCircle } from "react-icons/lu";
 import { cn } from "@/lib/utils";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import {
@@ -285,6 +286,7 @@ export default function CopilotPage() {
 
   // Input & Streaming State
   const [query, setQuery] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [currentStage, setCurrentStage] = useState<WorkflowStageInfo>(DEFAULT_STAGE);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
@@ -1093,8 +1095,9 @@ export default function CopilotPage() {
   // Submit Query in Active Conversation
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!query.trim() || streaming) return;
+    if (!query.trim() || streaming || submitting) return;
 
+    setSubmitting(true);
     let targetConv = activeConversation;
 
     // If no active conversation, create one automatically
@@ -1116,11 +1119,15 @@ export default function CopilotPage() {
           description: "Failed to initiate chat. Please try again.",
           variant: "destructive",
         });
+        setSubmitting(false);
         return;
       }
     }
 
-    if (!targetConv) return;
+    if (!targetConv) {
+      setSubmitting(false);
+      return;
+    }
 
     const currentQuery = query.trim();
     setQuery("");
@@ -1186,6 +1193,7 @@ export default function CopilotPage() {
       // Open SSE Stream to active run
       const sse = new EventSource(`/api/runs/${runId}/stream`);
       eventSourceRef.current = sse;
+      setSubmitting(false);
 
       sse.addEventListener("step_start", (evt: any) => {
         const data = JSON.parse(evt.data);
@@ -1337,6 +1345,7 @@ export default function CopilotPage() {
         variant: "destructive",
       });
       setStreaming(false);
+      setSubmitting(false);
       setSteps((prev) =>
         prev.map((s) => (s.status === "running" ? { ...s, status: "completed" } : s))
       );
@@ -1458,7 +1467,6 @@ export default function CopilotPage() {
         {/* Sidebar Header */}
         <div className="p-3 border-b border-border bg-card flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <AppIcons.copilot className="w-4 h-4 text-sky-600" />
             <span className="text-xs font-bold tracking-tight text-foreground uppercase">
               Recent Chats
             </span>
@@ -1529,9 +1537,7 @@ export default function CopilotPage() {
         {/* Workspace Top Header */}
         <div className="p-3.5 px-5 border-b border-border bg-card flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-sky-100 text-sky-700 border border-sky-200 flex items-center justify-center shrink-0">
-              <AppIcons.copilot className="w-3.5 h-3.5" />
-            </div>
+            <LuBot className="w-4 h-4 text-foreground shrink-0" />
             <div className="min-w-0">
               <h2 className="text-xs font-bold text-foreground truncate tracking-tight">
                 {activeConversation?.title || "Copilot Grounded Workspace"}
@@ -1599,13 +1605,11 @@ export default function CopilotPage() {
             </div>
           ) : messages.length === 0 && streamedText.length === 0 && !isRefused && !isAwaitingApproval && !accessDeniedMessage ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center py-12 px-4 select-none">
-              <div className="w-12 h-12 rounded-2xl bg-sky-100 text-sky-600 border border-sky-200 flex items-center justify-center mb-3 shadow-xs">
-                <AppIcons.copilot className="w-6 h-6" />
-              </div>
-              <h3 className="text-sm font-semibold text-slate-800 tracking-tight">
+              <LuBot className="w-8 h-8 text-foreground/70 mb-3" />
+              <h3 className="text-sm font-semibold text-foreground tracking-tight">
                 Ask a clinical protocol question
               </h3>
-              <p className="text-xs text-muted-foreground max-w-sm mt-1 leading-relaxed">
+              <p className="text-xs text-muted-foreground max-w-sm mt-1.5 leading-relaxed">
                 Queries are processed through hybrid retrieval, verified by specialist agents, and persisted to this conversation.
               </p>
             </div>
@@ -1632,9 +1636,9 @@ export default function CopilotPage() {
               return (
                 <div key={msg.id} className="flex justify-start">
                   <div className="max-w-[90%] bg-card border border-slate-200 rounded-2xl rounded-tl-xs p-4 shadow-2xs space-y-3">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-800">
-                        <AppIcons.copilot className="w-3.5 h-3.5 text-sky-600" />
+                    <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
+                        <LuBot className="w-3.5 h-3.5 text-foreground/80" />
                         <span>Domain Copilot</span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -1839,10 +1843,19 @@ export default function CopilotPage() {
 
         {/* Live Progress Rail (when streaming) */}
         {streaming && (
-          <div className="px-5 py-2 border-t border-border bg-slate-50">
+          <div className="px-5 py-2 border-t border-border bg-muted/20">
             <div className="flex items-center justify-between text-[11px] font-mono mb-1.5">
               <span className="text-muted-foreground font-semibold">LIVE AGENT PIPELINE:</span>
-              <span className="text-sky-600 font-semibold animate-pulse">Running...</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sky-600 font-semibold animate-pulse">Running...</span>
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="text-[10px] text-destructive hover:text-destructive/80 font-mono px-1.5 py-0.5 rounded border border-destructive/20 hover:bg-destructive/10 transition-colors"
+                >
+                  Stop
+                </button>
+              </div>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {steps.map((step, idx) => (
@@ -1870,44 +1883,45 @@ export default function CopilotPage() {
         )}
 
         {/* Question Composer Form */}
-        <form onSubmit={handleSubmit} className="p-3.5 px-4 border-t border-border bg-card">
-          <div className="flex gap-2">
+        <div className="p-3.5 px-4 border-t border-border bg-card">
+          <form
+            onSubmit={handleSubmit}
+            className="rounded-xl border border-border bg-background shadow-2xs transition-all focus-within:border-foreground/30 focus-within:ring-1 focus-within:ring-foreground/10 p-2.5 flex flex-col justify-between"
+          >
             <textarea
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  handleSubmit();
+                  if (!submitting && !streaming && query.trim()) {
+                    handleSubmit();
+                  }
                 }
               }}
               dir="auto"
               rows={2}
+              disabled={submitting}
               placeholder="Ask a question grounded in the clinical protocol corpus (English or Arabic)..."
-              className="flex-1 bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 resize-none font-sans"
+              className="w-full bg-transparent border-0 outline-none text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0 resize-none font-sans leading-relaxed min-h-[44px]"
             />
-            {streaming ? (
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={handleCancel}
-                className="gap-1.5 text-xs font-semibold shrink-0 h-auto"
-              >
-                <AppIcons.stop className="w-3.5 h-3.5 fill-current" />
-                Cancel
-              </Button>
-            ) : (
+            <div className="flex items-center justify-end pt-1">
               <Button
                 type="submit"
-                disabled={!query.trim()}
-                className="gap-1.5 text-xs font-semibold shrink-0 h-auto px-4 shadow-xs"
+                size="icon"
+                disabled={!query.trim() || submitting || streaming}
+                className="h-7 w-7 rounded-full shrink-0 transition-opacity flex items-center justify-center shadow-xs"
+                aria-label={submitting ? "Sending message" : "Send message"}
               >
-                <AppIcons.send className="w-3.5 h-3.5" />
-                Send
+                {submitting ? (
+                  <LuLoaderCircle className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <LuArrowUp className="w-3.5 h-3.5" />
+                )}
               </Button>
-            )}
-          </div>
-        </form>
+            </div>
+          </form>
+        </div>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════ */}
