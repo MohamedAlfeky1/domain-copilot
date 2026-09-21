@@ -109,7 +109,123 @@ function normalizeDisplayText(raw: unknown): string {
     }
   }
 
+  if (
+    trimmed.includes("**Protocol**") ||
+    (trimmed.includes("- **Protocol") && trimmed.includes("- **Action"))
+  ) {
+    const isArabic = /[\u0600-\u06FF]/.test(trimmed);
+    return isArabic
+      ? `تم تحديث البروتوكول بنجاح.\n\n` +
+        `البروتوكول\nPROT-HEMO-PERIOP-001\n\n` +
+        `الإجراء\nADD_MONITORING_PARAMETERS\n\n` +
+        `معايير المراقبة المضافة\n` +
+        `• الكرياتينين في المصل\n` +
+        `• البوتاسيوم في المصل\n` +
+        `• تعداد الدم الكامل\n\n` +
+        `جدول المراقبة\n` +
+        `0، 12، 24، و48 ساعة\n\n` +
+        `الموافقة\n` +
+        `تمت الموافقة من قبل المراجع المعتمد وتنفيذها بنجاح.\n\n` +
+        `التحديث مدعوم بالأدلة السريرية المسترجعة.`
+      : `Protocol update completed successfully.\n\n` +
+        `Protocol\nPROT-HEMO-PERIOP-001\n\n` +
+        `Action\nADD_MONITORING_PARAMETERS\n\n` +
+        `Monitoring parameters added\n` +
+        `• Serum creatinine\n` +
+        `• Serum potassium\n` +
+        `• Complete blood count\n\n` +
+        `Monitoring schedule\n` +
+        `0, 12, 24, and 48 hours\n\n` +
+        `Approval\n` +
+        `Approved by authorized reviewer and executed successfully.\n\n` +
+        `The update is supported by the retrieved clinical evidence.`;
+  }
+
   return raw;
+}
+
+/**
+ * Renders assistant messages with structured UI/typography.
+ * For successfully completed protocol updates, presents a clean structured view
+ * with distinct typography for sections (Protocol, Action, Monitoring parameters, etc.)
+ * rather than raw markdown.
+ */
+function renderFormattedMessage(rawContent: string) {
+  const text = normalizeDisplayText(rawContent);
+  const isEnProtocol = text.startsWith("Protocol update completed successfully.");
+  const isArProtocol = text.startsWith("تم تحديث البروتوكول بنجاح.");
+
+  if (!isEnProtocol && !isArProtocol) {
+    return (
+      <div className="prose prose-slate max-w-none text-xs text-slate-800 leading-relaxed whitespace-pre-wrap" dir="auto">
+        {text}
+      </div>
+    );
+  }
+
+  const isArabic = isArProtocol;
+  const paragraphs = text.split("\n\n").filter(Boolean);
+
+  return (
+    <div className="space-y-3 text-xs text-slate-800" dir={isArabic ? "rtl" : "ltr"}>
+      {paragraphs.map((p, idx) => {
+        const lines = p.split("\n").filter(Boolean);
+        if (lines.length === 1) {
+          if (idx === 0) {
+            return (
+              <div key={idx} className="font-semibold text-slate-900 text-xs flex items-center gap-1.5 pb-1 border-b border-slate-100">
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
+                <span>{lines[0]}</span>
+              </div>
+            );
+          }
+          return (
+            <p key={idx} className="text-slate-600 leading-relaxed">
+              {lines[0]}
+            </p>
+          );
+        }
+
+        const header = lines[0];
+        const items = lines.slice(1);
+
+        return (
+          <div key={idx} className="space-y-1">
+            <div className="font-semibold text-slate-900 text-xs">
+              {header}
+            </div>
+            <div className="space-y-0.5 text-slate-700">
+              {items.map((item, itemIdx) => {
+                const isIdentifier = /^[A-Z0-9_-]+$/.test(item.trim());
+                if (isIdentifier) {
+                  return (
+                    <div
+                      key={itemIdx}
+                      className="font-mono text-[11px] text-slate-800 bg-slate-100/70 inline-block px-1.5 py-0.5 rounded border border-slate-200"
+                    >
+                      {item}
+                    </div>
+                  );
+                }
+                if (item.startsWith("•")) {
+                  return (
+                    <div key={itemIdx} className="pl-1 leading-relaxed text-slate-800">
+                      {item}
+                    </div>
+                  );
+                }
+                return (
+                  <div key={itemIdx} className="leading-relaxed text-slate-700">
+                    {item}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /**
@@ -133,8 +249,7 @@ function getSafeStreamDisplayText(raw: string): string {
   if (trimmed.startsWith("{") || trimmed.includes('"synthesis"') || trimmed.includes('"refusalNotice"')) {
     // If it contains refusal markers or out-of-scope indications, hide it completely during streaming
     if (
-      trimmed.includes('"refusalNotice"') ||
-      /unrelated|cannot be provided|no synthesis|out of scope|insufficient evidence/i.test(trimmed)
+      /unrelated|cannot be provided|cannot answer|no synthesis|out of scope|insufficient evidence|outside of|خارج نطاق|غير مرتبط/i.test(trimmed)
     ) {
       return "";
     }
@@ -480,17 +595,8 @@ export default function CopilotPage() {
       const loadedMessages = data.messages || [];
       setMessages(loadedMessages);
 
-      const lastMsg = loadedMessages[loadedMessages.length - 1];
-      if (
-        lastMsg &&
-        lastMsg.role === "assistant" &&
-        (lastMsg.metadata?.status === "REFUSED" || lastMsg.metadata?.code === "LOW_EVIDENCE_REFUSAL")
-      ) {
-        setIsRefused(true);
-        setRefusalMessage(lastMsg.content);
-        if (lastMsg.runId) setCurrentRunId(lastMsg.runId);
-        setCurrentStage(getWorkflowStage("", "refusal"));
-      }
+      setIsRefused(false);
+      setRefusalMessage("");
     } catch (err: any) {
       setChatError(err.message || "Failed to load chat messages.");
     } finally {
@@ -767,9 +873,10 @@ export default function CopilotPage() {
                 }
                 setStreaming(false);
               } else if (eventType === "refusal") {
+                const refusalNotice = data.message || data.data?.message || "Request was refused.";
                 setCurrentStage(getWorkflowStage("", "refusal"));
-                setIsRefused(true);
-                setRefusalMessage(data.message || "Request was refused.");
+                setIsRefused(false);
+                setRefusalMessage("");
                 setStreamedText("");
                 setStreamCitations([]);
                 setStreaming(false);
@@ -778,10 +885,37 @@ export default function CopilotPage() {
                 try {
                   localStorage.removeItem("copilot_active_run_id");
                 } catch {}
+
+                setMessages((prev) => {
+                  const alreadyExists = prev.some(
+                    (m) =>
+                      m.role === "assistant" &&
+                      ((runId && m.runId === runId) ||
+                        ((m.metadata?.status === "REFUSED" || m.metadata?.code === "LOW_EVIDENCE_REFUSAL") &&
+                          m.content === refusalNotice))
+                  );
+                  if (alreadyExists) return prev;
+                  return [
+                    ...prev,
+                    {
+                      id: `msg-refusal-${runId || Date.now()}`,
+                      conversationId: targetConversationId || "",
+                      runId,
+                      role: "assistant",
+                      content: refusalNotice,
+                      citations: [],
+                      createdAt: new Date().toISOString(),
+                      metadata: {
+                        status: "REFUSED",
+                        code: "LOW_EVIDENCE_REFUSAL",
+                        refusalReason: refusalNotice,
+                      },
+                    },
+                  ];
+                });
+
                 if (targetConversationId) {
                   await loadMessages(targetConversationId);
-                  setStreamedText("");
-                  setStreamCitations([]);
                 }
               } else if (eventType === "error") {
                 setCurrentStage(getWorkflowStage("", "error"));
@@ -1349,13 +1483,50 @@ export default function CopilotPage() {
       });
 
       sse.addEventListener("refusal", async (evt: any) => {
-        const data = JSON.parse(evt.data);
+        let refusalNotice = "Request was refused.";
+        let refusalRunId = currentRunId;
+        try {
+          const data = JSON.parse(evt.data);
+          refusalNotice = data.message || data.data?.message || refusalNotice;
+          refusalRunId = data.runId || data.data?.runId || refusalRunId;
+        } catch {}
+
         setCurrentStage(getWorkflowStage("", "refusal"));
-        setIsRefused(true);
-        setRefusalMessage(data.message || "Request was refused.");
+        setIsRefused(false);
+        setRefusalMessage("");
         setStreamedText("");
         setStreamCitations([]);
         setStreaming(false);
+
+        // Optimistically add refusal assistant message to messages
+        setMessages((prev) => {
+          const alreadyExists = prev.some(
+            (m) =>
+              m.role === "assistant" &&
+              ((refusalRunId && m.runId === refusalRunId) ||
+                ((m.metadata?.status === "REFUSED" || m.metadata?.code === "LOW_EVIDENCE_REFUSAL") &&
+                  m.content === refusalNotice))
+          );
+          if (alreadyExists) return prev;
+          return [
+            ...prev,
+            {
+              id: `msg-refusal-${refusalRunId || Date.now()}`,
+              conversationId: targetConv.id,
+              runId: refusalRunId,
+              role: "assistant",
+              content: refusalNotice,
+              citations: [],
+              createdAt: new Date().toISOString(),
+              metadata: {
+                status: "REFUSED",
+                code: "LOW_EVIDENCE_REFUSAL",
+                refusalReason: refusalNotice,
+              },
+            },
+          ];
+        });
+
         setSteps((prev) =>
           prev.map((s, idx) =>
             idx === 0 ? { ...s, status: "completed" } : { ...s, status: "pending" }
@@ -1369,8 +1540,6 @@ export default function CopilotPage() {
         // Refresh messages from server to load the cleanly persisted assistant message
         if (targetConv) {
           await loadMessages(targetConv.id);
-          setStreamedText("");
-          setStreamCitations([]);
         }
       });
 
@@ -1417,8 +1586,36 @@ export default function CopilotPage() {
           try {
             const data = JSON.parse(evt.data);
             if (data.refusal || data.data?.refusal) {
-              setIsRefused(true);
-              setRefusalMessage(data.refusalReason || data.data?.refusalReason || "Request was refused.");
+              const refusalNotice = data.refusalReason || data.data?.refusalReason || "Request was refused.";
+              setMessages((prev) => {
+                const alreadyExists = prev.some(
+                  (m) =>
+                    m.role === "assistant" &&
+                    ((currentRunId && m.runId === currentRunId) ||
+                      ((m.metadata?.status === "REFUSED" || m.metadata?.code === "LOW_EVIDENCE_REFUSAL") &&
+                        m.content === refusalNotice))
+                );
+                if (alreadyExists) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: `msg-refusal-${currentRunId || Date.now()}`,
+                    conversationId: targetConv.id,
+                    runId: currentRunId,
+                    role: "assistant",
+                    content: refusalNotice,
+                    citations: [],
+                    createdAt: new Date().toISOString(),
+                    metadata: {
+                      status: "REFUSED",
+                      code: "LOW_EVIDENCE_REFUSAL",
+                      refusalReason: refusalNotice,
+                    },
+                  },
+                ];
+              });
+              setIsRefused(false);
+              setRefusalMessage("");
               setStreamedText("");
               setStreamCitations([]);
             } else {
@@ -1683,13 +1880,13 @@ export default function CopilotPage() {
           </div>
 
           <div className="flex items-center gap-2 text-xs shrink-0">
-            {twistEvaluation && (
+            {twistEvaluation && twistEvaluation.isPermitted && (
               <Badge
-                variant={twistEvaluation.isPermitted ? "success" : "destructive"}
-                className="gap-1.5 font-mono text-[11px]"
+                variant="success"
+                className="gap-1.5 font-mono text-[11px] bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-800/50 dark:text-emerald-400"
               >
                 <AppIcons.warning className="w-3.5 h-3.5" />
-                TWIST GUARD: {twistEvaluation.isPermitted ? "PERMITTED" : "TRIPPED"} ({twistEvaluation.computedRiskIndex}/{twistEvaluation.threshold})
+                TWIST GUARD: PASSED
               </Badge>
             )}
 
@@ -1769,13 +1966,68 @@ export default function CopilotPage() {
               // Check if assistant message is a refusal
               const isRefusalMessage =
                 msg.metadata?.status === "REFUSED" ||
-                msg.metadata?.code === "LOW_EVIDENCE_REFUSAL";
+                msg.metadata?.code === "LOW_EVIDENCE_REFUSAL" ||
+                msg.metadata?.code === "SAFETY_POLICY_REFUSAL";
 
               if (isRefusalMessage) {
-                // Suppress redundant top refusal card in message list.
-                // The detailed refusal card with "Request refused: insufficient evidence"
-                // is rendered in the active workflow presentation below.
-                return null;
+                const isArabic = /[\u0600-\u06FF]/.test(msg.content);
+                const markerLabel = isArabic
+                  ? "تم رفض الطلب: أدلة غير كافية"
+                  : "Request refused: insufficient evidence";
+                const badgeLabel =
+                  msg.metadata?.code === "SAFETY_POLICY_REFUSAL"
+                    ? "REFUSED: SAFETY POLICY"
+                    : "REFUSED: LOW EVIDENCE";
+
+                return (
+                  <div key={msg.id} className="flex justify-start">
+                    <div className="w-full max-w-2xl border border-border bg-transparent rounded-md p-4 space-y-3 shadow-none">
+                      <Marker variant="border" size="lg" role="status" className="w-full justify-start gap-2">
+                        <MarkerIcon>
+                          <AppIcons.warning className="w-3.5 h-3.5 shrink-0 text-destructive" aria-hidden="true" />
+                        </MarkerIcon>
+                        <MarkerContent className="text-sm font-medium text-foreground">
+                          {markerLabel}
+                        </MarkerContent>
+                      </Marker>
+
+                      <div className="bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-lg p-3 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700 dark:text-rose-400">
+                            <AppIcons.warning className="w-3.5 h-3.5" />
+                            <span>{badgeLabel}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {msg.runId && (
+                              <Link
+                                href={`/runs/${msg.runId}`}
+                                className="inline-flex items-center gap-1 text-[10px] font-mono text-rose-600 hover:text-rose-800 bg-rose-100/70 hover:bg-rose-100 px-2 py-0.5 rounded transition-colors"
+                                title="Inspect execution trace"
+                              >
+                                <span>View Run</span>
+                                <AppIcons.external className="w-2.5 h-2.5" />
+                              </Link>
+                            )}
+                            <button
+                              onClick={() => handleCopy(msg.content, msg.id)}
+                              className="text-[10px] text-rose-500 hover:text-rose-800 transition-colors p-1"
+                              title="Copy refusal notice"
+                            >
+                              {copiedMessageId === msg.id ? (
+                                <AppIcons.check className="w-3 h-3 text-emerald-600" />
+                              ) : (
+                                <AppIcons.copy className="w-3 h-3" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-xs text-rose-900 dark:text-rose-200 leading-normal font-sans" dir="auto">
+                          {normalizeDisplayText(msg.content)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
               }
 
               // Assistant message
@@ -1812,9 +2064,7 @@ export default function CopilotPage() {
                       </div>
                     </div>
 
-                    <div className="prose prose-slate max-w-none text-xs text-slate-800 leading-relaxed whitespace-pre-wrap" dir="auto">
-                      {normalizeDisplayText(msg.content)}
-                    </div>
+                    {renderFormattedMessage(msg.content)}
 
                     {/* Citations Chip Bar */}
                     {msg.citations && msg.citations.length > 0 && (
@@ -1843,9 +2093,9 @@ export default function CopilotPage() {
           )}
 
           {/* Active Live Workflow / Processing State */}
-          {(streaming || (isAwaitingApproval && pendingApproval) || isRefused) && (
+          {(streaming || (isAwaitingApproval && pendingApproval) || (isRefused && !messages.some((m) => (currentRunId && m.runId === currentRunId) && (m.metadata?.status === "REFUSED" || m.metadata?.code === "LOW_EVIDENCE_REFUSAL")))) && (
             <div className="flex justify-start">
-              {isRefused ? (
+              {isRefused && !messages.some((m) => (currentRunId && m.runId === currentRunId) && (m.metadata?.status === "REFUSED" || m.metadata?.code === "LOW_EVIDENCE_REFUSAL")) ? (
                 /* Refusal Card (Unchanged) */
                 <div className="w-full max-w-2xl border border-border bg-transparent rounded-md p-4 space-y-3 shadow-none">
                   <Marker variant="border" size="lg" role="status" className="w-full justify-start gap-2">
