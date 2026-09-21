@@ -32,10 +32,12 @@ require.extensions[".ts"] = function (module, filename) {
 const {
   resolveAIProvider,
   createAIProvider,
+  resolveStepTimeoutMs,
   ConfigurationError,
   SUPPORTED_AI_PROVIDERS,
 } = require("../src/infrastructure/ai/ai-provider.factory.ts");
 const { OpenAIProviderAdapter } = require("../src/infrastructure/ai/openai.adapter.ts");
+const { OllamaProviderAdapter } = require("../src/infrastructure/ai/ollama.adapter.ts");
 const { container, buildContainer } = require("../src/core/application/container.ts");
 
 async function runProviderFactoryTests() {
@@ -98,6 +100,27 @@ async function runProviderFactoryTests() {
     assert.strictEqual(provider.providerName, "openai");
   });
 
+  await test("A5. AI_PROVIDER=ollama environment variable selects Ollama adapter", () => {
+    process.env.AI_PROVIDER = "ollama";
+    delete process.env.OLLAMA_MODEL;
+    const provider = resolveAIProvider();
+
+    assert.ok(provider, "Provider must be returned");
+    assert.strictEqual(provider.providerName, "ollama");
+    assert.ok(provider instanceof OllamaProviderAdapter, "Must be an instance of OllamaProviderAdapter");
+    assert.strictEqual(provider.getModelName(), "qwen3:8b");
+  });
+
+  await test("A6. Explicit config parameter { provider: 'ollama' } selects Ollama adapter with model override", () => {
+    delete process.env.AI_PROVIDER;
+    const provider = resolveAIProvider({ provider: "ollama", model: "qwen3:8b-custom" });
+
+    assert.ok(provider);
+    assert.strictEqual(provider.providerName, "ollama");
+    assert.ok(provider instanceof OllamaProviderAdapter);
+    assert.strictEqual(provider.getModelName(), "qwen3:8b-custom");
+  });
+
   // ---------------------------------------------------------------------------
   // Test B: Invalid provider value -> clear configuration error
   // ---------------------------------------------------------------------------
@@ -113,7 +136,7 @@ async function runProviderFactoryTests() {
           `Expected message to include unsupported provider, got: ${err.message}`
         );
         assert.ok(
-          err.message.includes("Supported providers: openai, openrouter"),
+          err.message.includes("Supported providers: openai, openrouter, ollama"),
           `Expected message to list supported providers, got: ${err.message}`
         );
         return true;
@@ -305,6 +328,33 @@ async function runProviderFactoryTests() {
     // In executeDrafterPhase, orchestrator calls:
     // await this.db.recordUsage({ provider: this.aiProvider.providerName, ... })
     assert.strictEqual(customProvider.providerName, "custom-mock-ai");
+  });
+
+  // ---------------------------------------------------------------------------
+  // Scenario G: Provider-Aware Step Timeout Resolution (Ollama vs Cloud)
+  // ---------------------------------------------------------------------------
+  await test("G1. resolveStepTimeoutMs defaults to 60000ms for Ollama provider", () => {
+    delete process.env.OLLAMA_STEP_TIMEOUT_MS;
+    delete process.env.STEP_TIMEOUT_MS;
+    assert.strictEqual(resolveStepTimeoutMs("ollama"), 60000);
+  });
+
+  await test("G2. resolveStepTimeoutMs defaults to 30000ms for OpenAI and OpenRouter", () => {
+    delete process.env.STEP_TIMEOUT_MS;
+    assert.strictEqual(resolveStepTimeoutMs("openai"), 30000);
+    assert.strictEqual(resolveStepTimeoutMs("openrouter"), 30000);
+    assert.strictEqual(resolveStepTimeoutMs(""), 30000);
+  });
+
+  await test("G3. resolveStepTimeoutMs respects OLLAMA_STEP_TIMEOUT_MS and STEP_TIMEOUT_MS overrides", () => {
+    process.env.OLLAMA_STEP_TIMEOUT_MS = "75000";
+    assert.strictEqual(resolveStepTimeoutMs("ollama"), 75000);
+    delete process.env.OLLAMA_STEP_TIMEOUT_MS;
+
+    process.env.STEP_TIMEOUT_MS = "45000";
+    assert.strictEqual(resolveStepTimeoutMs("openai"), 45000);
+    assert.strictEqual(resolveStepTimeoutMs("ollama"), 45000); // Falls back to STEP_TIMEOUT_MS when OLLAMA_STEP_TIMEOUT_MS unset
+    delete process.env.STEP_TIMEOUT_MS;
   });
 
   // Restore env

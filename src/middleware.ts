@@ -20,6 +20,25 @@ const PROTECTED_PAGE_PREFIXES = [
   "/settings",
 ];
 
+function resolveAllowedOrigin(req: NextRequest): string | null {
+  const origin = req.headers.get("origin");
+  if (!origin) return null;
+
+  const configured =
+    process.env.CORS_ORIGIN ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.NODE_ENV !== "production" ? "http://localhost:3000" : undefined);
+
+  if (!configured) return null;
+
+  const allowedOrigins = configured
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+  return allowedOrigins.includes(origin) ? origin : null;
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const token = extractAuthToken(req);
@@ -61,12 +80,16 @@ export async function middleware(req: NextRequest) {
   requestHeaders.set("x-pathname", pathname);
 
   // Handle CORS preflight
+  const allowedOrigin = resolveAllowedOrigin(req);
   if (req.method === "OPTIONS") {
     const preflightHeaders = new Headers();
-    preflightHeaders.set("Access-Control-Allow-Origin", "*");
-    preflightHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    preflightHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-correlation-id");
-    preflightHeaders.set("Access-Control-Max-Age", "86400");
+    if (allowedOrigin) {
+      preflightHeaders.set("Access-Control-Allow-Origin", allowedOrigin);
+      preflightHeaders.set("Vary", "Origin");
+      preflightHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      preflightHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-correlation-id");
+      preflightHeaders.set("Access-Control-Max-Age", "86400");
+    }
     preflightHeaders.set("x-correlation-id", correlationId);
     return new NextResponse(null, { status: 204, headers: preflightHeaders });
   }
@@ -101,9 +124,12 @@ export async function middleware(req: NextRequest) {
   response.headers.set("Content-Security-Policy", cspHeader);
 
   // CORS headers
-  response.headers.set("Access-Control-Allow-Origin", "*");
-  response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-correlation-id");
+  if (allowedOrigin) {
+    response.headers.set("Access-Control-Allow-Origin", allowedOrigin);
+    response.headers.set("Vary", "Origin");
+    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-correlation-id");
+  }
 
   return response;
 }

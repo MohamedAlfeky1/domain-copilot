@@ -46,7 +46,7 @@ export function buildExtractorPrompt(ctx: PromptContext): string {
 
   return `You are the Evidence Extractor specialist for Domain: ${ctx.domainName}.
 
-Your task: Extract key factual claims, data points, and constraints directly from the provided evidence.
+Your task: Extract the 3 to 5 most important factual claims, data points, and constraints directly from the provided evidence to answer the query.
 Query: "${sanitizePromptBoundary(ctx.query)}"
 ${toolSection}
 
@@ -68,6 +68,8 @@ You MUST respond with valid JSON matching this exact schema:
 }
 
 Rules:
+- Extract the 3 to 5 most important clinical facts directly addressing the query.
+- Keep each statement concise (1-2 sentences max), factual, without redundant explanation or introductory filler.
 - Only extract facts directly supported by the provided evidence.
 - Assign confidence scores honestly based on evidence strength.
 - Set dataCompleteness to INSUFFICIENT if evidence is sparse or ambiguous.
@@ -101,21 +103,24 @@ You MUST respond with valid JSON matching this exact schema:
   "verifiedFacts": ["<facts confirmed as accurate and safe>"],
   "riskFlags": [
     {
-      "riskType": "<type of risk identified>",
+      "riskType": "<one of: Dosage Violation, Contraindication, Toxicity, Off-Label Claim, Compliance Violation>",
       "severity": "<one of: LOW, MEDIUM, HIGH, CRITICAL>",
       "detail": "<explanation of the risk>"
     }
   ],
   "domainComplianceApproved": <true if findings meet compliance criteria, false otherwise>,
-  "requiresHumanReview": <true if any HIGH or CRITICAL risk flags exist>,
-  "proposedAction": "<optional: recommended action if compliance fails>"
+  "requiresHumanReview": <true ONLY if a side-effecting action is being PROPOSED and is clinically safe/compliant; false for informational queries or unsafe actions>,
+  "proposedAction": "<optional: description of the proposed action if an action was explicitly requested>"
 }
 
 Rules:
 - Flag any claim that violates the domain risk policy.
-- Set requiresHumanReview to true if any CRITICAL or HIGH severity risks exist.
-- Set domainComplianceApproved to false if policy violations are found.
-- Be conservative: when uncertain, flag for human review.
+- For unsafe dosing, unverified dosage calculation without weight/renal parameters, or therapeutic ceiling breaches, set riskType to "Dosage Violation" with severity HIGH or CRITICAL, and set domainComplianceApproved to false.
+- For dangerous drug-drug interactions or contraindications, set riskType to "Contraindication" with severity HIGH or CRITICAL, and set domainComplianceApproved to false.
+- For informational queries (e.g. asking "What...", "Which...", "Why...", "How...", or describing clinical facts/protocols without commanding an action): set requiresHumanReview to false, do NOT populate proposedAction with the query topic, and set domainComplianceApproved to true if the clinical facts are accurate.
+- Do NOT set requiresHumanReview to true for data completeness concerns, scope violations, or purely informational queries.
+- Set requiresHumanReview to true ONLY when a safe, compliant consequential action is being PROPOSED and needs human authorization.
+- Set domainComplianceApproved to false if policy violations or safety limits are breached.
 - Respond with ONLY the JSON object, no markdown fences, no explanation.`;
 }
 

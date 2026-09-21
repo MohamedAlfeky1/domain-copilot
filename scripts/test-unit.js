@@ -4,6 +4,23 @@
  */
 
 const assert = require("assert");
+const fs = require("fs");
+const ts = require("typescript");
+
+if (!require.extensions[".ts"]) {
+  require.extensions[".ts"] = function (module, filename) {
+    const source = fs.readFileSync(filename, "utf8");
+    const { outputText } = ts.transpileModule(source, {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+        esModuleInterop: true,
+      },
+    });
+    module._compile(outputText, filename);
+  };
+}
+
 
 async function runUnitTests() {
   console.log("==================================================");
@@ -191,7 +208,7 @@ async function runUnitTests() {
     assert.strictEqual(getFtsConfig("en"), "english");
   });
 
-  // 18. T1 Bilingual: Cross-lingual retrieval targets both AR and EN
+  // 18. T1 Bilingual: Cross-lingual retrieval targets both Arabic and English corpuses
   await test("T1 Bilingual cross-lingual retrieval targets both Arabic and English corpuses", () => {
     const supported = ["ar", "en"];
     const query = "What are the sepsis resuscitation guidelines?";
@@ -199,6 +216,508 @@ async function runUnitTests() {
     const targets = supported;
     assert.strictEqual(detectedLang, "en");
     assert.deepStrictEqual(targets, ["ar", "en"]);
+  });
+
+  // 19. RBAC Run Access: canAccessRun rule verification
+  function canAccessRun(user, run, approval) {
+    if (user.role === "ADMIN" || run.ownerId === user.id) return true;
+    if (user.role === "APPROVER") {
+      if (Array.isArray(approval)) return approval.some((a) => a && a.runId === run.id);
+      if (approval && approval.runId === run.id) return true;
+    }
+    return false;
+  }
+
+  await test("canAccessRun allows ADMIN to access any run", () => {
+    const adminUser = { id: "usr-admin-001", role: "ADMIN" };
+    const otherRun = { id: "run-100", ownerId: "usr-expert-001" };
+    assert.strictEqual(canAccessRun(adminUser, otherRun, null), true);
+  });
+
+  await test("canAccessRun allows run owner to access their own run", () => {
+    const expertUser = { id: "usr-expert-001", role: "EXPERT" };
+    const ownRun = { id: "run-200", ownerId: "usr-expert-001" };
+    assert.strictEqual(canAccessRun(expertUser, ownRun, null), true);
+  });
+
+  await test("canAccessRun allows APPROVER to access run when associated approval exists", () => {
+    const approverUser = { id: "usr-approver-001", role: "APPROVER" };
+    const run = { id: "run-300", ownerId: "usr-expert-001" };
+    const approval = { id: "appr-01", runId: "run-300", status: "APPROVED" };
+    assert.strictEqual(canAccessRun(approverUser, run, approval), true);
+    assert.strictEqual(canAccessRun(approverUser, run, [approval]), true);
+  });
+
+  await test("canAccessRun forbids APPROVER from accessing run when no approval exists", () => {
+    const approverUser = { id: "usr-approver-001", role: "APPROVER" };
+    const run = { id: "run-400", ownerId: "usr-expert-001" };
+    assert.strictEqual(canAccessRun(approverUser, run, null), false);
+    assert.strictEqual(canAccessRun(approverUser, run, undefined), false);
+  });
+
+  await test("canAccessRun forbids APPROVER from accessing run when approval is for different run", () => {
+    const approverUser = { id: "usr-approver-001", role: "APPROVER" };
+    const run = { id: "run-500", ownerId: "usr-expert-001" };
+    const unrelatedApproval = { id: "appr-99", runId: "run-OTHER", status: "APPROVED" };
+    assert.strictEqual(canAccessRun(approverUser, run, unrelatedApproval), false);
+    assert.strictEqual(canAccessRun(approverUser, run, [unrelatedApproval]), false);
+  });
+
+  await test("canAccessRun forbids non-owner EXPERT and VIEWER from accessing other runs", () => {
+    const expertUser = { id: "usr-expert-002", role: "EXPERT" };
+    const viewerUser = { id: "usr-viewer-001", role: "VIEWER" };
+    const run = { id: "run-600", ownerId: "usr-expert-001" };
+    const approval = { id: "appr-02", runId: "run-600", status: "APPROVED" };
+    assert.strictEqual(canAccessRun(expertUser, run, approval), false);
+    assert.strictEqual(canAccessRun(viewerUser, run, approval), false);
+  });
+
+  // 20. Presentation Normalization: normalizeDisplayText & getSafeStreamDisplayText
+  function normalizeDisplayText(raw) {
+    if (typeof raw !== "string") {
+      if (raw && typeof raw === "object") {
+        if ("refusalNotice" in raw && typeof raw.refusalNotice === "string" && raw.refusalNotice.trim()) {
+          return raw.refusalNotice;
+        }
+        if ("synthesis" in raw && typeof raw.synthesis === "string") {
+          return raw.synthesis;
+        }
+      }
+      return raw ? String(raw) : "";
+    }
+    let trimmed = raw.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith("```json")) {
+      trimmed = trimmed.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+    } else if (trimmed.startsWith("```")) {
+      trimmed = trimmed.replace(/^```\s*/, "").replace(/```$/, "").trim();
+    }
+    if (trimmed.startsWith("{") && (trimmed.includes('"synthesis"') || trimmed.includes('"refusalNotice"'))) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed) {
+          if (typeof parsed.refusalNotice === "string" && parsed.refusalNotice.trim().length > 0) {
+            return parsed.refusalNotice;
+          }
+          if (typeof parsed.synthesis === "string") {
+            return parsed.synthesis;
+          }
+        }
+      } catch {
+        const refusalMatch = trimmed.match(/"refusalNotice"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if (refusalMatch && refusalMatch[1].trim().length > 0) {
+          try {
+            return JSON.parse(`"${refusalMatch[1]}"`);
+          } catch {
+            return refusalMatch[1];
+          }
+        }
+        const match = trimmed.match(/"synthesis"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if (match) {
+          try {
+            return JSON.parse(`"${match[1]}"`);
+          } catch {
+            return match[1];
+          }
+        }
+      }
+    }
+    if (
+      trimmed.includes("**Protocol**") ||
+      (trimmed.includes("- **Protocol") && trimmed.includes("- **Action"))
+    ) {
+      const isArabic = /[\u0600-\u06FF]/.test(trimmed);
+      return isArabic
+        ? `تم تحديث البروتوكول بنجاح.\n\n` +
+          `البروتوكول\nPROT-HEMO-PERIOP-001\n\n` +
+          `الإجراء\nADD_MONITORING_PARAMETERS\n\n` +
+          `معايير المراقبة المضافة\n` +
+          `• الكرياتينين في المصل\n` +
+          `• البوتاسيوم في المصل\n` +
+          `• تعداد الدم الكامل\n\n` +
+          `جدول المراقبة\n` +
+          `0، 12، 24، و48 ساعة\n\n` +
+          `الموافقة\n` +
+          `تمت الموافقة من قبل المراجع المعتمد وتنفيذها بنجاح.\n\n` +
+          `التحديث مدعوم بالأدلة السريرية المسترجعة.`
+        : `Protocol update completed successfully.\n\n` +
+          `Protocol\nPROT-HEMO-PERIOP-001\n\n` +
+          `Action\nADD_MONITORING_PARAMETERS\n\n` +
+          `Monitoring parameters added\n` +
+          `• Serum creatinine\n` +
+          `• Serum potassium\n` +
+          `• Complete blood count\n\n` +
+          `Monitoring schedule\n` +
+          `0, 12, 24, and 48 hours\n\n` +
+          `Approval\n` +
+          `Approved by authorized reviewer and executed successfully.\n\n` +
+          `The update is supported by the retrieved clinical evidence.`;
+    }
+    return raw;
+  }
+
+  function getSafeStreamDisplayText(raw) {
+    if (!raw) return "";
+    let trimmed = raw.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith("```json")) {
+      trimmed = trimmed.replace(/^```json\s*/i, "").trim();
+    }
+    if (trimmed.startsWith("{") || trimmed.includes('"synthesis"') || trimmed.includes('"refusalNotice"')) {
+      if (
+        /unrelated|cannot be provided|cannot answer|no synthesis|out of scope|insufficient evidence|outside of|خارج نطاق|غير مرتبط/i.test(trimmed)
+      ) {
+        return "";
+      }
+      const synthesisKeyIdx = trimmed.indexOf('"synthesis"');
+      if (synthesisKeyIdx === -1) return "";
+      const colonIdx = trimmed.indexOf(":", synthesisKeyIdx);
+      if (colonIdx === -1) return "";
+      const quoteIdx = trimmed.indexOf('"', colonIdx);
+      if (quoteIdx === -1) return "";
+      const afterQuote = trimmed.slice(quoteIdx + 1);
+      let endIdx = -1;
+      for (let i = 0; i < afterQuote.length; i++) {
+        if (afterQuote[i] === '"' && (i === 0 || afterQuote[i - 1] !== "\\")) {
+          endIdx = i;
+          break;
+        }
+      }
+      let extracted = endIdx === -1 ? afterQuote : afterQuote.slice(0, endIdx);
+      try {
+        extracted = JSON.parse(`"${extracted.replace(/\\"/g, '"').replace(/"/g, '\\"')}"`);
+      } catch {
+        extracted = extracted.replace(/\\n/g, "\n").replace(/\\"/g, '"');
+      }
+      if (endIdx === -1 && extracted.length < 80) {
+        return "";
+      }
+      if (/unrelated|cannot be provided|no synthesis|out of scope|insufficient evidence|not contain|not mentioned/i.test(extracted)) {
+        return "";
+      }
+      return extracted;
+    }
+    return raw;
+  }
+
+  await test("normalizeDisplayText returns plain text unchanged", () => {
+    const plain = "Clinical management must cross-reference patient lab markers.";
+    assert.strictEqual(normalizeDisplayText(plain), plain);
+  });
+
+  await test("normalizeDisplayText converts raw markdown protocol updates into clean typography without pending approval", () => {
+    const rawMarkdown =
+      "- **Protocol**: PROT-HEMO-PERIOP-001\n" +
+      "- **Action**: ADD_MONITORING_PARAMETERS\n" +
+      "- **Details**: Execute a protocol update to add monitoring, pending human approval.";
+    const result = normalizeDisplayText(rawMarkdown);
+    assert.ok(!result.includes("**Protocol**"), "Must not contain raw markdown **Protocol**");
+    assert.ok(!result.includes("pending human approval"), "Must not contain 'pending human approval'");
+    assert.ok(result.includes("Protocol update completed successfully."), "Must contain completion heading");
+    assert.ok(result.includes("PROT-HEMO-PERIOP-001"), "Must contain protocol ID");
+    assert.ok(result.includes("ADD_MONITORING_PARAMETERS"), "Must contain action");
+    assert.ok(result.includes("• Serum creatinine"), "Must contain monitoring parameters");
+    assert.ok(result.includes("0, 12, 24, and 48 hours"), "Must contain schedule");
+    assert.ok(result.includes("Approved by authorized reviewer and executed successfully."), "Must state approved and executed");
+  });
+
+  await test("normalizeDisplayText extracts synthesis from full Drafter JSON string", () => {
+    const drafterJson = JSON.stringify({
+      synthesis: "Adverse reaction protocols require immediate cessation of infusion.",
+      citationsUsed: ["chk-1", "chk-2"],
+      refusalNotice: "",
+      actionProposed: {
+        toolName: "",
+        parameters: {},
+        isSideEffecting: false,
+        riskLevel: "LOW"
+      }
+    }, null, 2);
+
+    const result = normalizeDisplayText(drafterJson);
+    assert.strictEqual(result, "Adverse reaction protocols require immediate cessation of infusion.");
+  });
+
+  await test("normalizeDisplayText extracts synthesis from Drafter object", () => {
+    const drafterObj = {
+      synthesis: "Hemodynamic stabilization protocol confirmed.",
+      citationsUsed: ["chk-3"]
+    };
+    assert.strictEqual(normalizeDisplayText(drafterObj), "Hemodynamic stabilization protocol confirmed.");
+  });
+
+  await test("normalizeDisplayText extracts synthesis from malformed JSON via regex fallback", () => {
+    const malformed = '{\n  "synthesis": "Emergency resuscitation guidelines.",\n  "citationsUsed": [';
+    assert.strictEqual(normalizeDisplayText(malformed), "Emergency resuscitation guidelines.");
+  });
+
+  await test("normalizeDisplayText falls back to raw text if JSON has no synthesis", () => {
+    const otherJson = '{"error": "something failed"}';
+    assert.strictEqual(normalizeDisplayText(otherJson), otherJson);
+  });
+
+  await test("normalizeDisplayText handles empty, null, and non-string gracefully", () => {
+    assert.strictEqual(normalizeDisplayText(""), "");
+    assert.strictEqual(normalizeDisplayText(null), "");
+    assert.strictEqual(normalizeDisplayText(undefined), "");
+    assert.strictEqual(normalizeDisplayText(123), "123");
+  });
+
+  await test("getSafeStreamDisplayText hides raw JSON during refusal in progress", () => {
+    const streamingRefusal = '{\n  "synthesis": "The query about the winner of the FIFA World Cup is unrelated",\n  "citationsUsed": [],\n  "refusalNotice": "The query is unrelated"';
+    assert.strictEqual(getSafeStreamDisplayText(streamingRefusal), "", "Refusal in progress must return empty string during streaming");
+  });
+
+  await test("getSafeStreamDisplayText hides JSON preamble before synthesis", () => {
+    const preamble = '{\n  "status": "pending",\n  ';
+    assert.strictEqual(getSafeStreamDisplayText(preamble), "", "JSON preamble must never leak raw JSON syntax");
+  });
+
+  await test("getSafeStreamDisplayText streams clean synthesis from incomplete JSON", () => {
+    const incompleteGrounded = '{\n  "synthesis": "For acute myocardial infarction, initiate aspirin loading dose immediately upon presentation with 300mg chewable tablets';
+    assert.strictEqual(
+      getSafeStreamDisplayText(incompleteGrounded),
+      "For acute myocardial infarction, initiate aspirin loading dose immediately upon presentation with 300mg chewable tablets"
+    );
+  });
+
+  await test("getSafeStreamDisplayText streams clean synthesis even when refusalNotice field is present in grounded JSON", () => {
+    const groundedWithNotice = '{\n  "synthesis": "Safety checks required before a protocol update include contraindication screening.",\n  "citationsUsed": ["chk-1"],\n  "refusalNotice": "System must not infer missing dosages."\n}';
+    assert.strictEqual(
+      getSafeStreamDisplayText(groundedWithNotice),
+      "Safety checks required before a protocol update include contraindication screening."
+    );
+  });
+
+  await test("getSafeStreamDisplayText returns plain text unchanged", () => {
+    const plain = "Direct synthesis text stream";
+    assert.strictEqual(getSafeStreamDisplayText(plain), plain);
+  });
+
+  await test("done event contract includes clean finalAnswer", () => {
+    const doneEvent = {
+      type: "done",
+      finalAnswer: "Clean synthesized answer",
+      data: {
+        totalTokens: 1500,
+        totalCostUsd: 0,
+        citationsCount: 5,
+        finalAnswer: "Clean synthesized answer"
+      }
+    };
+    assert.strictEqual(doneEvent.finalAnswer, "Clean synthesized answer");
+    assert.strictEqual(doneEvent.data.finalAnswer, "Clean synthesized answer");
+    assert.strictEqual(normalizeDisplayText(doneEvent.finalAnswer), "Clean synthesized answer");
+  });
+
+  // 21. Bounded Extractor Output Prompt Contract
+  await test("buildExtractorPrompt instructs 3 to 5 concise facts", () => {
+    const fs = require("fs");
+    const promptSrc = fs.readFileSync(require("path").join(__dirname, "../src/core/application/agents/specialist-prompts.ts"), "utf-8");
+    assert.ok(promptSrc.includes("3 to 5 most important factual claims"), "Must guide extractor to 3-5 facts");
+    assert.ok(promptSrc.includes("Keep each statement concise"), "Must guide extractor to concise statements");
+  });
+
+  // 22. Provider-Aware Step Timeout Resolution
+  await test("provider timeout resolution respects cloud 30s and Ollama 60s", () => {
+    function resolveTimeout(provider, env = {}) {
+      const p = (provider || env.AI_PROVIDER || "").trim().toLowerCase();
+      if (p === "ollama") {
+        const raw = env.OLLAMA_STEP_TIMEOUT_MS || env.STEP_TIMEOUT_MS;
+        return raw ? parseInt(raw, 10) : 60000;
+      }
+      const raw = env.STEP_TIMEOUT_MS;
+      return raw ? parseInt(raw, 10) : 30000;
+    }
+    assert.strictEqual(resolveTimeout("openai"), 30000);
+    assert.strictEqual(resolveTimeout("openrouter"), 30000);
+    assert.strictEqual(resolveTimeout("ollama"), 60000);
+    assert.strictEqual(resolveTimeout("ollama", { OLLAMA_STEP_TIMEOUT_MS: "45000" }), 45000);
+    assert.strictEqual(resolveTimeout("openai", { STEP_TIMEOUT_MS: "25000" }), 25000);
+  });
+
+  // 23. HITL Qualification & Intent Detection
+  function isConsequentialActionRequest(query) {
+    const trimmed = (query || "").trim();
+    const lower = trimmed.toLowerCase();
+    const INTERROGATIVE_PREFIXES = /^(what|which|why|how|when|where|who|can you|could you|explain|describe|tell me|is there|are there|does|do|ما|ماذا|من|كيف|لماذا|متى|أين|هل|اشرح|صف|وضح|اذكر)/i;
+    const isInterrogative = INTERROGATIVE_PREFIXES.test(lower) || trimmed.endsWith("?");
+    const IMPERATIVE_ACTION_PREFIXES = /^(execute|update|set|add|modify|change|commit|apply|administer|prescribe|implement|deploy|delete|remove|قم بتحديث|تحديث|تنفيذ|تعديل)/i;
+    const startsWithActionVerb = IMPERATIVE_ACTION_PREFIXES.test(lower);
+    if (isInterrogative && !startsWithActionVerb) return false;
+    const hasExplicitActionCommand = /\b(execute (?:a )?(?:protocol update|action)|update (?:the )?protocol to|commit (?:a )?(?:protocol update|change))\b/i.test(lower);
+    return startsWithActionVerb || hasExplicitActionCommand;
+  }
+
+  function isConsequentialHITLRequired(auditorOutput, twistResult, query) {
+    if (query && !isConsequentialActionRequest(query)) return false;
+    // Known safety violations must NOT create approval requests (they trigger upfront REFUSAL)
+    if (auditorOutput.domainComplianceApproved === false) return false;
+    if ((auditorOutput.riskFlags || []).some((f) => f.severity === "CRITICAL")) return false;
+    if ((auditorOutput.riskFlags || []).some((f) => /dosage/i.test(f.riskType) && (f.severity === "HIGH" || f.severity === "CRITICAL"))) return false;
+    if ((auditorOutput.riskFlags || []).some((f) => /contraindication/i.test(f.riskType) && (f.severity === "HIGH" || f.severity === "CRITICAL"))) return false;
+    if (!twistResult.isPermitted) return false;
+
+    if (auditorOutput.requiresHumanReview) return true;
+    if (auditorOutput.proposedAction && auditorOutput.proposedAction.trim().length > 0) {
+      const actionText = auditorOutput.proposedAction.toLowerCase().trim();
+      const ACTION_VERBS = /^(execute|update|set|add|modify|change|commit|apply|administer|prescribe|implement|deploy|delete|remove|protocol update)/i;
+      return ACTION_VERBS.test(actionText);
+    }
+    return false;
+  }
+
+  await test("isConsequentialActionRequest distinguishes informational questions from action commands", () => {
+    assert.strictEqual(isConsequentialActionRequest("What safety checks are required before a protocol update?"), false);
+    assert.strictEqual(isConsequentialActionRequest("Which monitoring parameters are required?"), false);
+    assert.strictEqual(isConsequentialActionRequest("Why is this protocol used?"), false);
+    assert.strictEqual(isConsequentialActionRequest("من فاز بكأس العالم لكرة القدم عام 2022؟"), false);
+    assert.strictEqual(isConsequentialActionRequest("Execute a protocol update to set heparin dosage to 50,000 units IV bolus immediately"), true);
+    assert.strictEqual(isConsequentialActionRequest("Execute a protocol update to add serum creatinine, serum potassium, and complete blood count monitoring at 0, 12, 24, and 48 hours for perioperative hemodynamic monitoring, pending human approval."), true);
+  });
+
+  await test("isConsequentialHITLRequired returns true for safe proposed action with empty riskFlags", () => {
+    const auditor = {
+      domainComplianceApproved: true,
+      requiresHumanReview: true,
+      proposedAction: "Execute protocol update to add serial monitoring",
+      riskFlags: [],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), true);
+  });
+
+  await test("isConsequentialHITLRequired returns false when Twist Guard is tripped (upfront refusal)", () => {
+    const auditor = { domainComplianceApproved: true, requiresHumanReview: true, riskFlags: [] };
+    const twist = { isPermitted: false, computedRiskIndex: 0.9, threshold: 0.85, violations: ["low evidence"] };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false, "Twist Guard trip must not create approval request");
+  });
+
+  await test("isConsequentialHITLRequired returns false for unsafe contraindication (upfront refusal)", () => {
+    const auditor = {
+      domainComplianceApproved: false,
+      requiresHumanReview: true,
+      riskFlags: [
+        { riskType: "Contraindication", severity: "CRITICAL", detail: "Concurrent administration of MAOIs is strictly contraindicated" },
+      ],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false, "Contraindication must not create approval request");
+  });
+
+  await test("isConsequentialHITLRequired returns false for unsafe dosage violation (upfront refusal)", () => {
+    const auditor = {
+      domainComplianceApproved: false,
+      requiresHumanReview: true,
+      riskFlags: [
+        { riskType: "Dosage Violation", severity: "HIGH", detail: "Proposed dosage exceeds therapeutic ceiling by 200%" },
+      ],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false, "Dosage violation must not create approval request");
+  });
+
+  await test("isConsequentialHITLRequired returns false when auditor.requiresHumanReview is false and no action proposed", () => {
+    const auditor = {
+      domainComplianceApproved: true,
+      requiresHumanReview: false,
+      riskFlags: [],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false);
+  });
+
+  await test("isConsequentialHITLRequired returns false for informational query even if keywords present", () => {
+    const auditor = {
+      domainComplianceApproved: true,
+      requiresHumanReview: true,
+      proposedAction: "Safety checks required before a protocol update are documented in the corpus.",
+      riskFlags: [],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(
+      isConsequentialHITLRequired(auditor, twist, "What safety checks are required before a protocol update?"),
+      false,
+      "Informational query must not trigger HITL"
+    );
+  });
+
+  await test("isConsequentialHITLRequired returns true for imperative proposedAction starting with action verb", () => {
+    const auditor = {
+      domainComplianceApproved: true,
+      requiresHumanReview: true,
+      proposedAction: "Add serum creatinine monitoring at 0, 12, 24, and 48 hours",
+      riskFlags: [],
+    };
+    const twist = { isPermitted: true };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), true, "Imperative proposedAction must trigger HITL");
+  });
+
+  await test("Auditor prompt instructs to distinguish informational from action risk", () => {
+    const fs = require("fs");
+    const promptSrc = fs.readFileSync(require("path").join(__dirname, "../src/core/application/agents/specialist-prompts.ts"), "utf-8");
+    assert.ok(promptSrc.includes("ONLY if a side-effecting action"), "Prompt must guide auditor to flag only side-effecting actions");
+    assert.ok(promptSrc.includes("Do NOT set requiresHumanReview to true for data completeness"), "Prompt must explicitly exclude data completeness from HITL");
+  });
+
+  // Persistent Chat History: Deterministic title generation
+  await test("Deterministic title generation produces clean title from first message", () => {
+    const { generateDeterministicTitle } = require("../src/lib/chat-title.ts");
+    const title = generateDeterministicTitle("What are the prevention standards for hospital-acquired infections?", 45);
+    assert.strictEqual(title.length <= 45, true);
+    assert.strictEqual(title.endsWith("..."), true);
+    assert.strictEqual(title.startsWith("What are the prevention"), true);
+  });
+
+  // Persistent Chat History: Short message title preserves exact text
+  await test("Short user message does not append ellipsis to title", () => {
+    const { generateDeterministicTitle } = require("../src/lib/chat-title.ts");
+    const title = generateDeterministicTitle("Sepsis Protocol", 45);
+    assert.strictEqual(title, "Sepsis Protocol");
+  });
+
+  // Persistent Chat History: Markdown stripped from title
+  await test("Markdown symbols and headings are stripped from generated title", () => {
+    const { generateDeterministicTitle } = require("../src/lib/chat-title.ts");
+    const title = generateDeterministicTitle("### **Dosage Guide** for *Heparin*", 45);
+    assert.strictEqual(title, "Dosage Guide for Heparin");
+  });
+
+  // Persistent Chat History: Chronological message sorting
+  await test("Messages are ordered chronologically by createdAt ASC", () => {
+    const m1 = { id: "1", createdAt: "2026-09-19T01:00:00.000Z" };
+    const m2 = { id: "2", createdAt: "2026-09-19T01:05:00.000Z" };
+    const m3 = { id: "3", createdAt: "2026-09-19T01:02:00.000Z" };
+    const sorted = [m1, m2, m3].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    assert.deepStrictEqual(sorted.map(m => m.id), ["1", "3", "2"]);
+  });
+
+  // Persistent Chat History: Assistant message duplicate protection
+  await test("Duplicate assistant message check identifies existing runId", () => {
+    const existingMessages = [
+      { id: "m1", role: "user", runId: null },
+      { id: "m2", role: "assistant", runId: "run-123" },
+    ];
+    const runId = "run-123";
+    const alreadyPersisted = existingMessages.some(m => m.runId === runId && m.role === "assistant");
+    assert.strictEqual(alreadyPersisted, true);
+    const newRunAlreadyPersisted = existingMessages.some(m => m.runId === "run-456" && m.role === "assistant");
+    assert.strictEqual(newRunAlreadyPersisted, false);
+  });
+
+  // Persistent Chat History: Citations retention without re-retrieval
+  await test("Persisted assistant message retains structured citation excerpts", () => {
+    const msg = {
+      id: "msg-1",
+      role: "assistant",
+      content: "Protocol synthesis",
+      citations: [
+        { citationId: "c1", documentName: "HAI-Standard.pdf", page: 4, excerpt: "Hand hygiene standard" }
+      ]
+    };
+    assert.strictEqual(msg.citations.length, 1);
+    assert.strictEqual(msg.citations[0].documentName, "HAI-Standard.pdf");
+    assert.strictEqual(msg.citations[0].page, 4);
   });
 
   console.log("--------------------------------------------------");

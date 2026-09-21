@@ -347,6 +347,85 @@ async function runAuthRbacTestSuite() {
     assert.ok([403, 404].includes(resumeRes.status), `Expected 403 or 404, got ${resumeRes.status}`);
   });
 
+  await testCase("OWN-007", "Authorized APPROVER can inspect a run that has an associated approval request (200)", async () => {
+    const adminToken = await login("admin@domaincopilot.ai", "admin123");
+    const approverToken = await login("approver@domaincopilot.ai", "approver123");
+
+    const queryRes = await request("/api/queries", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: { query: "chemotherapy dosing verification" },
+    });
+    const runId = queryRes.data.runId;
+
+    await request("/api/approvals", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: {
+        runId,
+        proposedAction: "Review chemotherapy dosing verification protocol",
+        riskLevel: "HIGH",
+        payload: { verification: true },
+      },
+    });
+
+    const inspectRes = await request(`/api/runs/${runId}`, {
+      headers: { Authorization: `Bearer ${approverToken}` },
+    });
+    assert.strictEqual(inspectRes.status, 200, "Approver must be able to inspect a run with an associated approval");
+    assert.strictEqual(inspectRes.data.run.id, runId);
+  });
+
+  await testCase("OWN-008", "APPROVER cannot inspect an unrelated run with NO approval (403)", async () => {
+    const expertToken = await login("expert@domaincopilot.ai", "expert123");
+    const approverToken = await login("approver@domaincopilot.ai", "approver123");
+
+    const queryRes = await request("/api/queries", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${expertToken}` },
+      body: { query: "routine vital check without approval" },
+    });
+    const runId = queryRes.data.runId;
+
+    const inspectRes = await request(`/api/runs/${runId}`, {
+      headers: { Authorization: `Bearer ${approverToken}` },
+    });
+    assert.strictEqual(inspectRes.status, 403, "Approver must receive 403 on run with no approval");
+  });
+
+  await testCase("OWN-009", "VIEWER is forbidden (403) from inspecting runs even if an approval exists", async () => {
+    const adminToken = await login("admin@domaincopilot.ai", "admin123");
+    const viewerToken = await login("viewer@domaincopilot.ai", "viewer123");
+
+    const queryRes = await request("/api/queries", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: { query: "cardiology consult with approval" },
+    });
+    const runId = queryRes.data.runId;
+
+    await request("/api/approvals", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: {
+        runId,
+        proposedAction: "Confirm cardiology intervention",
+        riskLevel: "HIGH",
+        payload: { check: true },
+      },
+    });
+
+    const inspectRes = await request(`/api/runs/${runId}`, {
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
+    assert.strictEqual(inspectRes.status, 403, "Viewer must be forbidden from run inspection");
+  });
+
+  await testCase("OWN-010", "Unauthenticated GET /api/runs/:id returns 401 Unauthorized", async () => {
+    const res = await request("/api/runs/run-test-any-id");
+    assert.strictEqual(res.status, 401, "Unauthenticated run inspection must return 401");
+  });
+
   // ---------------------------------------------------------------------------
   // 7. UI Entry Flow & Page Route Protection
   // ---------------------------------------------------------------------------

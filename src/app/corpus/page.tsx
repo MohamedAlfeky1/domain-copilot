@@ -10,12 +10,14 @@ import { CorpusCharts } from "@/components/corpus/corpus-charts";
 import { CorpusActivityFeed } from "@/components/corpus/corpus-activity-feed";
 import { ChunkDrawer } from "@/components/corpus/chunk-drawer";
 import { CorpusEmptyState } from "@/components/corpus/corpus-empty-state";
+import { toast } from "@/components/ui/use-toast";
 
 export default function CorpusPage() {
   const [documents, setDocuments] = useState<any[]>([]);
   const [jobs, setJobs] = useState<any[]>([]);
   const [totalChunks, setTotalChunks] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
   const [chunks, setChunks] = useState<any[]>([]);
@@ -24,21 +26,53 @@ export default function CorpusPage() {
   const [dbLatencyMs, setDbLatencyMs] = useState<number | undefined>(undefined);
   const [pgvectorStatus, setPgvectorStatus] = useState("AVAILABLE");
 
-  const fetchCorpusData = async () => {
-    try {
-      setLoading(true);
+  const [error, setError] = useState<string | null>(null);
 
-      // 1. Fetch document and job inventory
-      const docsPromise = fetch("/api/documents")
-        .then(async (res) => {
-          if (res.ok) {
-            const data = await res.json();
-            setDocuments(data.documents || []);
-            setJobs(data.jobs || []);
-            setTotalChunks(data.totalChunksIndexed || 0);
-          }
+  const getAuthHeaders = (): Record<string, string> => {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("dc_token") : null;
+      if (token) return { Authorization: `Bearer ${token}` };
+    } catch {}
+    return {};
+  };
+
+  const fetchDocumentsWithAuth = async (retryCount = 0): Promise<any> => {
+    const res = await fetch("/api/documents", {
+      headers: getAuthHeaders(),
+    });
+
+    if (res.ok) {
+      return await res.json();
+    }
+
+    // Bounded retry for 401 authentication readiness race on initial mount
+    if (res.status === 401 && retryCount < 1) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return fetchDocumentsWithAuth(retryCount + 1);
+    }
+
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData?.error || `Failed to load documents (HTTP ${res.status})`);
+  };
+
+  const fetchCorpusData = async (isManualRefresh = false) => {
+    try {
+      if (isManualRefresh) {
+        setRefreshing(true);
+      }
+      setError(null);
+
+      // 1. Fetch document and job inventory with auth and bounded 401 retry
+      const docsPromise = fetchDocumentsWithAuth()
+        .then((data) => {
+          setDocuments(data.documents || []);
+          setJobs(data.jobs || []);
+          setTotalChunks(data.totalChunksIndexed || 0);
         })
-        .catch((err) => console.error("Failed to load documents:", err));
+        .catch((err: any) => {
+          console.error("Corpus documents load error:", err?.message || err);
+          setError(err?.message || "Failed to load corpus documents");
+        });
 
       // 2. Fetch runtime database and pgvector readiness
       const readyPromise = fetch("/readyz")
@@ -55,10 +89,12 @@ export default function CorpusPage() {
         .catch(() => setReadyStatus("UNHEALTHY"));
 
       await Promise.all([docsPromise, readyPromise]);
-    } catch (err) {
-      console.error("Corpus data fetch error:", err);
+    } catch (err: any) {
+      console.error("Corpus data fetch error:", err?.message || err);
+      setError(err?.message || "Failed to load corpus data");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -77,17 +113,29 @@ export default function CorpusPage() {
 
       const res = await fetch("/api/documents", {
         method: "POST",
+        headers: getAuthHeaders(),
         body: formData,
       });
 
       if (res.ok) {
         await fetchCorpusData();
+        toast({
+          title: "Upload Successful",
+          description: "Document uploaded successfully.",
+        });
       } else {
-        const err = await res.json();
-        alert(`Upload error: ${err.error || "Failed to ingest document"}`);
+        toast({
+          title: "Upload Failed",
+          description: "Failed to upload document. Please try again.",
+          variant: "destructive",
+        });
       }
     } catch (err: any) {
-      alert(`Upload failed: ${err.message}`);
+      toast({
+        title: "Upload Failed",
+        description: "Failed to upload document. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setUploading(false);
       if (e.target) {
@@ -100,7 +148,9 @@ export default function CorpusPage() {
     setSelectedDoc(doc);
     try {
       setChunksLoading(true);
-      const res = await fetch(`/api/documents/${doc.id}`);
+      const res = await fetch(`/api/documents/${doc.id}`, {
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setChunks(data.chunks || []);
@@ -133,9 +183,10 @@ export default function CorpusPage() {
       {/* 1. Page Header */}
       <CorpusHeader
         loading={loading}
+        refreshing={refreshing}
         uploading={uploading}
         readyStatus={readyStatus}
-        onRefresh={fetchCorpusData}
+        onRefresh={() => fetchCorpusData(true)}
         onFileUpload={handleFileUpload}
       />
 
@@ -145,6 +196,7 @@ export default function CorpusPage() {
         totalPages={totalPages}
         totalChunks={totalChunks}
         failureCount={failureCount}
+        loading={loading}
       />
 
       {/* 3. Ingestion Pipeline Stepper + Corpus Health Side-by-Side */}
@@ -155,6 +207,7 @@ export default function CorpusPage() {
             totalChunks={totalChunks}
             jobs={jobs}
             isUploading={uploading}
+            loading={loading}
           />
         </div>
         <div className="lg:col-span-5 flex flex-col">
@@ -165,12 +218,34 @@ export default function CorpusPage() {
             dbLatencyMs={dbLatencyMs}
             pgvectorStatus={pgvectorStatus}
             isUploading={uploading}
+            loading={loading}
           />
         </div>
       </div>
 
-      {/* 4. Full-Width Document Catalog Inventory */}
-      {documents.length === 0 ? (
+      {/* 4. Corpus Analytics: Document Storage Distribution & Format Composition */}
+      {!loading && documents.length > 0 && (
+        <CorpusCharts documents={documents} totalChunks={totalChunks} />
+      )}
+
+      {/* 5. Temporal Activity: Recent Ingestion & Indexing Events */}
+      {!loading && documents.length > 0 && (
+        <CorpusActivityFeed documents={documents} />
+      )}
+
+      {/* 6. Detailed Records: Full-Width Document Catalog Inventory */}
+      {loading ? (
+        <DocumentInventory
+          documents={[]}
+          loading={true}
+          onInspectDoc={inspectDoc}
+        />
+      ) : error ? (
+        <div className="p-8 text-center bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
+          <p className="text-sm font-semibold">Failed to Load Corpus Documents</p>
+          <p className="text-xs text-muted-foreground mt-1">{error}</p>
+        </div>
+      ) : documents.length === 0 ? (
         <CorpusEmptyState
           onUploadClick={() => {
             const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -181,16 +256,9 @@ export default function CorpusPage() {
       ) : (
         <DocumentInventory
           documents={documents}
+          loading={false}
           onInspectDoc={inspectDoc}
         />
-      )}
-
-      {/* 5. Telemetry Distribution Visualizations & Recent Ingestion Events */}
-      {documents.length > 0 && (
-        <div className="space-y-5 pt-1">
-          <CorpusCharts documents={documents} totalChunks={totalChunks} />
-          <CorpusActivityFeed documents={documents} />
-        </div>
       )}
 
       {/* 6. Chunk Inspector Slide-Over Drawer */}

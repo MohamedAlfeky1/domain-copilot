@@ -5,7 +5,7 @@
  */
 
 import { dbAdapter } from "../../infrastructure/db/database.adapter";
-import { resolveAIProvider, resolveEmbeddingProvider } from "../../infrastructure/ai/ai-provider.factory";
+import { resolveAIProvider, resolveEmbeddingProvider, resolveStepTimeoutMs } from "../../infrastructure/ai/ai-provider.factory";
 import { TesseractOcrAdapter } from "../../infrastructure/ocr/tesseract-ocr.adapter";
 import { IAIProviderPort } from "./ports/ai-provider.port";
 import { IOCRPort } from "./ports/ocr.port";
@@ -32,6 +32,7 @@ export interface AppContainer {
 
 export const buildContainer = (): AppContainer => {
   const currentAiProvider = resolveAIProvider();
+  const stepTimeoutMs = resolveStepTimeoutMs(currentAiProvider.providerName);
   const currentEmbeddingProvider = resolveEmbeddingProvider();
   const ocrPort = new TesseractOcrAdapter();
   toolRegistry.setTwistPort(twistAdapter);
@@ -44,7 +45,8 @@ export const buildContainer = (): AppContainer => {
     retrievalService,
     toolRegistry,
     approvalService,
-    twistAdapter
+    twistAdapter,
+    { stepTimeoutMs }
   );
 
   return {
@@ -62,5 +64,15 @@ export const buildContainer = (): AppContainer => {
   };
 };
 
-export const container: AppContainer = buildContainer();
+declare global {
+  var __appContainerInstance: AppContainer | undefined;
+}
+
+export const container: AppContainer =
+  globalThis.__appContainerInstance ?? buildContainer();
+
+if (process.env.NODE_ENV !== "production") {
+  globalThis.__appContainerInstance = container;
+}
+
 

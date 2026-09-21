@@ -6,6 +6,8 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/use-toast";
+import { FiCheckCircle } from "react-icons/fi";
 
 export default function ReviewsPage() {
   const [approvals, setApprovals] = useState<any[]>([]);
@@ -54,11 +56,33 @@ export default function ReviewsPage() {
         body: JSON.stringify({ comment }),
       });
       if (res.ok) {
-        alert("Action approved and executed successfully!");
+        const data = await res.json().catch(() => ({}));
+        const targetRunId = data.approval?.runId || selectedApproval.runId;
+        const targetConvId = data.conversationId || data.approval?.conversationId;
+        if (targetRunId) {
+          const convParam = targetConvId ? `conversationId=${encodeURIComponent(targetConvId)}&` : "";
+          window.location.href = `/copilot?${convParam}runId=${encodeURIComponent(targetRunId)}&resume=true`;
+          return;
+        }
+        toast({
+          title: "Action Approved",
+          description: "Action approved and executed successfully.",
+          icon: <FiCheckCircle className="w-5 h-5 text-foreground shrink-0" />,
+        });
         fetchApprovals();
+      } else {
+        toast({
+          title: "Approval Failed",
+          description: "Failed to approve action.",
+          variant: "destructive",
+        });
       }
     } catch (err: any) {
-      alert(`Approval failed: ${err.message}`);
+      toast({
+        title: "Approval Failed",
+        description: "Failed to approve action.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -72,17 +96,43 @@ export default function ReviewsPage() {
         body: JSON.stringify({ modifiedPayload: parsed, comment }),
       });
       if (res.ok) {
-        alert("Modified payload approved and executed!");
+        const data = await res.json().catch(() => ({}));
+        const targetRunId = data.approval?.runId || selectedApproval.runId;
+        const targetConvId = data.conversationId || data.approval?.conversationId;
+        if (targetRunId) {
+          const convParam = targetConvId ? `conversationId=${encodeURIComponent(targetConvId)}&` : "";
+          window.location.href = `/copilot?${convParam}runId=${encodeURIComponent(targetRunId)}&resume=true`;
+          return;
+        }
+        toast({
+          title: "Action Approved",
+          description: "Modified payload approved and executed successfully.",
+          icon: <FiCheckCircle className="w-5 h-5 text-foreground shrink-0" />,
+        });
         fetchApprovals();
+      } else {
+        toast({
+          title: "Approval Failed",
+          description: "Failed to submit modified payload.",
+          variant: "destructive",
+        });
       }
     } catch (err: any) {
-      alert(`Invalid JSON or request failed: ${err.message}`);
+      toast({
+        title: "Approval Failed",
+        description: "Invalid JSON or request failed.",
+        variant: "destructive",
+      });
     }
   };
 
   const handleReject = async () => {
     if (!selectedApproval || !rejectionReason.trim()) {
-      alert("Mandatory rejection reason is required.");
+      toast({
+        title: "Reason Required",
+        description: "Mandatory rejection reason is required.",
+        variant: "destructive",
+      });
       return;
     }
     try {
@@ -92,11 +142,25 @@ export default function ReviewsPage() {
         body: JSON.stringify({ reason: rejectionReason }),
       });
       if (res.ok) {
-        alert("Proposal rejected.");
+        toast({
+          title: "Proposal Rejected",
+          description: "Proposal has been rejected.",
+          variant: "default",
+        });
         fetchApprovals();
+      } else {
+        toast({
+          title: "Rejection Failed",
+          description: "Failed to reject proposal.",
+          variant: "destructive",
+        });
       }
     } catch (err: any) {
-      alert(`Rejection failed: ${err.message}`);
+      toast({
+        title: "Rejection Failed",
+        description: "Failed to reject proposal.",
+        variant: "destructive",
+      });
     }
   };
 

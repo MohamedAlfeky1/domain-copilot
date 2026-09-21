@@ -10,7 +10,22 @@
 
 const assert = require("assert");
 const crypto = require("crypto");
+const fs = require("fs");
 const { z } = require("zod");
+
+// Register on-the-fly TypeScript transpile for testing source files directly in Node.js 20+ CI
+const ts = require("typescript");
+require.extensions[".ts"] = function (module, filename) {
+  const source = fs.readFileSync(filename, "utf8");
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+      esModuleInterop: true,
+    },
+  });
+  module._compile(outputText, filename);
+};
 const {
   sanitizePromptBoundary,
   buildExtractorPrompt,

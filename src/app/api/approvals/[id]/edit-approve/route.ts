@@ -24,9 +24,14 @@ export async function POST(
       comment
     );
 
+    const run = approval.runId
+      ? await container.db.getRunById(approval.runId)
+      : null;
+
     return NextResponse.json({
       message: "Modified payload approved successfully",
       approval,
+      conversationId: run?.sessionId || null,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: error.httpStatus || 500 });

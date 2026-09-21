@@ -117,23 +117,34 @@ export function CorpusCharts({ documents, totalChunks }: CorpusChartsProps) {
 
         <div className="h-48 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={barData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+            <BarChart data={barData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
               <XAxis
-                dataKey="name"
-                tick={{ fontSize: 10, fill: "#64748B" }}
-                interval={0}
-                angle={-15}
-                textAnchor="end"
+                dataKey="fullName"
+                tick={false}
+                tickLine={false}
+                axisLine={{ stroke: "#64748B", strokeOpacity: 0.3 }}
               />
               <YAxis tick={{ fontSize: 10, fill: "#64748B" }} unit=" KB" />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: "#FFFFFF",
-                  border: "1px solid #E2E8F0",
+                  backgroundColor: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--border))",
                   borderRadius: "6px",
                   fontSize: "11px",
-                  color: "#0F172A",
+                  color: "hsl(var(--foreground))",
+                  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+                  maxWidth: "380px",
                 }}
+                labelStyle={{
+                  color: "hsl(var(--foreground))",
+                  fontWeight: 600,
+                  marginBottom: "4px",
+                  wordBreak: "break-word",
+                }}
+                itemStyle={{
+                  color: "hsl(var(--foreground))",
+                }}
+                cursor={{ fill: "hsl(var(--muted))", opacity: 0.2 }}
                 formatter={(val: any) => [`${val} KB`, "File Size"]}
                 labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName || ""}
               />
@@ -179,11 +190,15 @@ export function CorpusCharts({ documents, totalChunks }: CorpusChartsProps) {
               </Pie>
               <Tooltip
                 contentStyle={{
-                  backgroundColor: "#FFFFFF",
-                  border: "1px solid #E2E8F0",
+                  backgroundColor: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--border))",
                   borderRadius: "6px",
                   fontSize: "11px",
-                  color: "#0F172A",
+                  color: "hsl(var(--foreground))",
+                  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+                }}
+                itemStyle={{
+                  color: "hsl(var(--foreground))",
                 }}
                 formatter={(val: any) => [`${val} document(s)`, "Count"]}
               />

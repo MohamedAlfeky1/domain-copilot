@@ -15,14 +15,18 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. Sessions table (Persistent history)
-CREATE TABLE IF NOT EXISTS sessions (
+-- 2. Conversations table (Persistent chat history)
+CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations(owner_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
+
 
 -- 3. Documents table (Corpus identity)
 CREATE TABLE IF NOT EXISTS documents (
@@ -99,7 +103,7 @@ CREATE TABLE IF NOT EXISTS ingestion_jobs (
 -- 8. Runs table (Inspectable execution)
 CREATE TABLE IF NOT EXISTS runs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
+    session_id VARCHAR(255),
     correlation_id VARCHAR(100) UNIQUE NOT NULL,
     query TEXT NOT NULL,
     status VARCHAR(50) NOT NULL, -- STARTED, STREAMING, APPROVAL_PENDING, COMPLETED, REFUSED, FAILED, CANCELLED
@@ -109,7 +113,26 @@ CREATE TABLE IF NOT EXISTS runs (
     ended_at TIMESTAMPTZ
 );
 
+CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session_id);
+
+-- 8b. Messages table (Persistent conversation messages)
+CREATE TABLE IF NOT EXISTS messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    run_id UUID REFERENCES runs(id) ON DELETE SET NULL,
+    role VARCHAR(20) NOT NULL, -- 'user', 'assistant'
+    content TEXT NOT NULL,
+    citations JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_messages_run ON messages(run_id);
+
 -- 9. Run Steps table (Trace timeline)
+
 CREATE TABLE IF NOT EXISTS run_steps (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id UUID NOT NULL REFERENCES runs(id) ON DELETE CASCADE,

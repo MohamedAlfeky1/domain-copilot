@@ -6,6 +6,11 @@
 **Audience:** Postgraduate Engineers & Senior AI Software Architects  
 **Prerequisites:** Familiarity with Vector Embeddings, PostgreSQL, and TypeScript  
 
+> **Teaching Sample Deliverable:**  
+> https://youtu.be/GUfWgL3hzOM  
+> **Description:** A teaching video where I explain “Synchronous vs Asynchronous JavaScript” as part of a JavaScript educational series on YouTube, provided as an available sample demonstrating instructional delivery.  
+> *(Note: The script below defines the specific Domain Copilot curriculum session plan, while the external link above serves as an available teaching sample demonstrating teaching delivery.)*
+
 ---
 
 ## 10-Minute Lecture Schedule & Teaching Plan

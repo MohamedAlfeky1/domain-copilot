@@ -35,6 +35,8 @@ import {
   User,
   EvaluationCase,
   EvaluationResult,
+  Conversation,
+  Message,
 } from "../../core/domain/types";
 import { IncompatibleFilterScopeError } from "../../core/domain/errors";
 import { PGlite } from "@electric-sql/pglite";
@@ -60,6 +62,8 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
   private usageLedger: UsageRecord[] = [];
   private evalCases: Map<string, EvaluationCase> = new Map();
   private evalResults: EvaluationResult[] = [];
+  private conversations: Map<string, Conversation> = new Map();
+  private messages: Map<string, Message> = new Map();
 
   // Real PostgreSQL Engine (PGlite with vector extension)
   private pg: PGlite | null = null;
@@ -138,6 +142,30 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
           vector vector NOT NULL,
           created_at TIMESTAMPTZ NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS conversations (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations(owner_id);
+        CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS messages (
+          id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          run_id TEXT,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          citations JSONB,
+          created_at TIMESTAMPTZ NOT NULL,
+          metadata JSONB
+        );
+        CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_messages_run ON messages(run_id);
       `);
       this.isPgReady = true;
 
@@ -183,6 +211,35 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
           );
         } catch {}
       }
+      for (const conv of this.conversations.values()) {
+        try {
+          await this.pg.query(
+            `INSERT INTO conversations (id, owner_id, title, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, updated_at = EXCLUDED.updated_at;`,
+            [conv.id, conv.ownerId, conv.title, conv.createdAt, conv.updatedAt]
+          );
+        } catch {}
+      }
+      for (const msg of this.messages.values()) {
+        try {
+          await this.pg.query(
+            `INSERT INTO messages (id, conversation_id, run_id, role, content, citations, created_at, metadata)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content;`,
+            [
+              msg.id,
+              msg.conversationId,
+              msg.runId || null,
+              msg.role,
+              msg.content,
+              msg.citations ? JSON.stringify(msg.citations) : null,
+              msg.createdAt,
+              msg.metadata ? JSON.stringify(msg.metadata) : null,
+            ]
+          );
+        } catch {}
+      }
     } catch (err) {
       console.warn("PGlite initialization notice (using memory fallback):", err);
       this.isPgReady = false;
@@ -216,6 +273,9 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
         approvals: Array.from(this.approvals.entries()),
         approvalEvents: this.approvalEvents,
         usageLedger: this.usageLedger,
+        evalResults: this.evalResults,
+        conversations: Array.from(this.conversations.entries()),
+        messages: Array.from(this.messages.entries()),
       };
 
       fs.writeFileSync(this.stateFilePath, JSON.stringify(state), "utf-8");
@@ -242,6 +302,9 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
       if (state.approvals) this.approvals = new Map(state.approvals);
       if (state.approvalEvents) this.approvalEvents = state.approvalEvents;
       if (state.usageLedger) this.usageLedger = state.usageLedger;
+      if (state.evalResults) this.evalResults = state.evalResults;
+      if (state.conversations) this.conversations = new Map(state.conversations);
+      if (state.messages) this.messages = new Map(state.messages);
 
       return this.documents.size > 0;
     } catch (err) {
@@ -989,7 +1052,38 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
     }
 
     // 3. High-Fidelity In-Memory Fallback Keyword Engine
-    const queryTokens = queryText.toLowerCase().split(/\W+/).filter((t) => t.length > 2);
+    // Filter out common English and Arabic stop words to prevent false-positive matches (e.g. "the", "who", "من")
+    const STOP_WORDS = new Set([
+      "a", "about", "above", "after", "again", "against", "all", "also", "and", "any",
+      "are", "because", "been", "before", "being", "below", "between", "both",
+      "but", "by", "can", "could", "did", "do", "does", "doing", "down", "during", "each",
+      "few", "for", "from", "further", "had", "has", "have", "having", "he", "her",
+      "here", "hers", "herself", "him", "himself", "his", "how", "i", "if", "in", "into", "is",
+      "it", "its", "itself", "just", "me", "more", "most", "my", "myself", "no", "nor", "not",
+      "now", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours",
+      "ourselves", "out", "over", "own", "same", "she", "should", "so", "some", "such",
+      "than", "that", "the", "their", "theirs", "them", "themselves", "then", "there",
+      "these", "they", "this", "those", "through", "to", "too", "under", "until", "up",
+      "very", "was", "we", "were", "what", "when", "where", "which", "while", "who",
+      "whom", "whose", "why", "will", "with", "won", "would", "you", "your", "yours",
+      "yourself", "yourselves",
+      // Common Arabic functional stop words
+      "من", "إلى", "عن", "على", "في", "حتى", "مع", "هذا", "هذه", "ذلك", "تلك",
+      "التي", "الذي", "الذين", "ما", "ماذا", "هل", "هو", "هي", "هم", "كان", "كانت",
+      "يكون", "أن", "إن", "ثم", "أو", "كم", "كيف", "أين", "متى"
+    ]);
+
+    // Split on whitespace and punctuation, keeping Unicode letters and digits
+    const rawTokens = queryText
+      .toLowerCase()
+      .split(/[\s,.;:!?()[\]{}"'\\/+\-_~`@#$%^&*<>|،؟؛]+/u)
+      .filter((t) => t.length > 2 || (t.length > 1 && /[\u0600-\u06FF]/u.test(t)));
+
+    const queryTokens = rawTokens.filter((t) => !STOP_WORDS.has(t));
+    if (queryTokens.length === 0) {
+      return [];
+    }
+
     const results: KeywordSearchResult[] = [];
 
     for (const chunk of this.chunks.values()) {
@@ -1104,6 +1198,16 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
       if (r.correlationId === correlationId) return r;
     }
     return null;
+  }
+
+  async getRunsBySessionId(sessionId: string): Promise<Run[]> {
+    const list: Run[] = [];
+    for (const r of this.runs.values()) {
+      if (r.sessionId === sessionId) {
+        list.push({ ...r });
+      }
+    }
+    return list.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
   }
 
   async updateRunStatus(
@@ -1249,6 +1353,7 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
 
   async saveEvaluationResult(result: EvaluationResult): Promise<void> {
     this.evalResults.push(result);
+    this.scheduleDiskPersist();
   }
 
   async listEvaluationResults(): Promise<EvaluationResult[]> {
@@ -1312,6 +1417,202 @@ export class DatabaseAdapter implements IDatabasePort, IVectorStorePort {
         checkedAt: new Date().toISOString(),
       },
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Conversations & Messages Persistence
+  // ---------------------------------------------------------------------------
+
+  async createConversation(conversation: Conversation): Promise<Conversation> {
+    const item: Conversation = { ...conversation };
+    this.conversations.set(item.id, item);
+
+    if (this.pg && this.isPgReady) {
+      try {
+        await this.pg.query(
+          `INSERT INTO conversations (id, owner_id, title, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, updated_at = EXCLUDED.updated_at;`,
+          [item.id, item.ownerId, item.title, item.createdAt, item.updatedAt]
+        );
+      } catch (err) {
+        console.warn("Notice: Failed to insert conversation into PGlite:", err);
+      }
+    }
+
+    this.scheduleDiskPersist();
+    return item;
+  }
+
+  async getConversationById(id: string): Promise<Conversation | null> {
+    const conv = this.conversations.get(id);
+    if (conv) return { ...conv };
+
+    if (this.pg && this.isPgReady) {
+      try {
+        const res = await this.pg.query<any>(
+          `SELECT id, owner_id as "ownerId", title, created_at as "createdAt", updated_at as "updatedAt"
+           FROM conversations WHERE id = $1 LIMIT 1;`,
+          [id]
+        );
+        if (res.rows.length > 0) {
+          const row = res.rows[0];
+          const loaded: Conversation = {
+            id: row.id,
+            ownerId: row.ownerId,
+            title: row.title,
+            createdAt: new Date(row.createdAt).toISOString(),
+            updatedAt: new Date(row.updatedAt).toISOString(),
+          };
+          this.conversations.set(loaded.id, loaded);
+          return loaded;
+        }
+      } catch {}
+    }
+
+    return null;
+  }
+
+  async listConversationsByOwner(ownerId: string): Promise<Conversation[]> {
+    const list: Conversation[] = [];
+    for (const c of this.conversations.values()) {
+      if (c.ownerId === ownerId) {
+        list.push({ ...c });
+      }
+    }
+
+    list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return list;
+  }
+
+  async updateConversation(id: string, updates: Partial<Pick<Conversation, "title" | "updatedAt">>): Promise<void> {
+    const existing = this.conversations.get(id);
+    if (!existing) return;
+
+    const updated: Conversation = {
+      ...existing,
+      ...updates,
+      updatedAt: updates.updatedAt || new Date().toISOString(),
+    };
+    this.conversations.set(id, updated);
+
+    if (this.pg && this.isPgReady) {
+      try {
+        await this.pg.query(
+          `UPDATE conversations SET title = $2, updated_at = $3 WHERE id = $1;`,
+          [id, updated.title, updated.updatedAt]
+        );
+      } catch {}
+    }
+
+    this.scheduleDiskPersist();
+  }
+
+  async deleteConversation(id: string): Promise<void> {
+    this.conversations.delete(id);
+
+    // Cascade delete messages in memory
+    for (const [msgId, msg] of this.messages.entries()) {
+      if (msg.conversationId === id) {
+        this.messages.delete(msgId);
+      }
+    }
+
+    if (this.pg && this.isPgReady) {
+      try {
+        await this.pg.query(`DELETE FROM messages WHERE conversation_id = $1;`, [id]);
+        await this.pg.query(`DELETE FROM conversations WHERE id = $1;`, [id]);
+      } catch {}
+    }
+
+    this.scheduleDiskPersist();
+  }
+
+  async createMessage(message: Message): Promise<Message> {
+    const item: Message = { ...message };
+    this.messages.set(item.id, item);
+
+    // Touch conversation updatedAt
+    const conv = this.conversations.get(item.conversationId);
+    if (conv) {
+      conv.updatedAt = item.createdAt;
+      this.conversations.set(conv.id, conv);
+    }
+
+    if (this.pg && this.isPgReady) {
+      try {
+        await this.pg.query(
+          `INSERT INTO messages (id, conversation_id, run_id, role, content, citations, created_at, metadata)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content;`,
+          [
+            item.id,
+            item.conversationId,
+            item.runId || null,
+            item.role,
+            item.content,
+            item.citations ? JSON.stringify(item.citations) : null,
+            item.createdAt,
+            item.metadata ? JSON.stringify(item.metadata) : null,
+          ]
+        );
+        if (conv) {
+          await this.pg.query(
+            `UPDATE conversations SET updated_at = $2 WHERE id = $1;`,
+            [conv.id, conv.updatedAt]
+          );
+        }
+      } catch (err) {
+        console.warn("Notice: Failed to insert message into PGlite:", err);
+      }
+    }
+
+    this.scheduleDiskPersist();
+    return item;
+  }
+
+  async listMessagesByConversation(conversationId: string): Promise<Message[]> {
+    const list: Message[] = [];
+    for (const m of this.messages.values()) {
+      if (m.conversationId === conversationId) {
+        list.push({ ...m });
+      }
+    }
+
+    list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    return list;
+  }
+
+  async getMessageById(id: string): Promise<Message | null> {
+    const msg = this.messages.get(id);
+    if (msg) return { ...msg };
+
+    if (this.pg && this.isPgReady) {
+      try {
+        const res = await this.pg.query<any>(
+          `SELECT id, conversation_id as "conversationId", run_id as "runId", role, content, citations, created_at as "createdAt", metadata
+           FROM messages WHERE id = $1 LIMIT 1;`,
+          [id]
+        );
+        if (res.rows.length > 0) {
+          const row = res.rows[0];
+          const loaded: Message = {
+            id: row.id,
+            conversationId: row.conversationId,
+            runId: row.runId || null,
+            role: row.role,
+            content: row.content,
+            citations: typeof row.citations === "string" ? JSON.parse(row.citations) : row.citations || null,
+            createdAt: new Date(row.createdAt).toISOString(),
+            metadata: typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata,
+          };
+          this.messages.set(loaded.id, loaded);
+          return loaded;
+        }
+      } catch {}
+    }
+
+    return null;
   }
 }
 
