@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS ingestion_jobs (
 -- 8. Runs table (Inspectable execution)
 CREATE TABLE IF NOT EXISTS runs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
+    session_id VARCHAR(255),
     correlation_id VARCHAR(100) UNIQUE NOT NULL,
     query TEXT NOT NULL,
     status VARCHAR(50) NOT NULL, -- STARTED, STREAMING, APPROVAL_PENDING, COMPLETED, REFUSED, FAILED, CANCELLED
@@ -112,6 +112,8 @@ CREATE TABLE IF NOT EXISTS runs (
     started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     ended_at TIMESTAMPTZ
 );
+
+CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session_id);
 
 -- 8b. Messages table (Persistent conversation messages)
 CREATE TABLE IF NOT EXISTS messages (
