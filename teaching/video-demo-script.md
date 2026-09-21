@@ -6,6 +6,10 @@
 **Primary AI Model:** OpenAI gpt-4o (Completions) & text-embedding-3-small (1536d)  
 **Presenter:** Lead AI Systems Engineer  
 
+> **Recorded Video Deliverable (Product Demo):**  
+> https://drive.google.com/file/d/1nzAQoCzD6WQtQ61tOoe5pSrktGN54r99/view?usp=drive_link  
+> *(Recorded product demonstration of the Domain Copilot platform corresponding to this storyboard and script.)*
+
 ---
 
 ## Storyboard Overview & Timeline

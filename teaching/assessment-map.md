@@ -215,8 +215,8 @@ To maintain complete audit transparency, internal project codes are classified a
 | **Answer Key** | **Official ITI Requirement** | Postgraduate Teaching Pack Specification | `teaching/stretch-challenges.md` solutions; `expected-outputs.md`. |
 | **5 Trainee Misconceptions** | **Official ITI Requirement** | Postgraduate Teaching Pack Specification | `teaching/common-mistakes.md` (Misconceptions 1–5). |
 | **Learning Outcomes Map** | **Official ITI Requirement** | Postgraduate Teaching Pack Specification | `teaching/assessment-map.md` (this document). |
-| **Video 1: Product Demo (5–8m)** | **Official ITI Requirement** | Video Deliverables Specification | `teaching/video-demo-script.md`. |
-| **Video 2: Teaching Sample (~10m)** | **Official ITI Requirement** | Video Deliverables Specification | `teaching/video-teaching-script.md`. |
+| **Video 1: Product Demo (5–8m)** | **Official ITI Requirement** | Video Deliverables Specification | [Domain Copilot Product Demo](https://drive.google.com/file/d/1nzAQoCzD6WQtQ61tOoe5pSrktGN54r99/view?usp=drive_link); storyboard in `teaching/video-demo-script.md`. |
+| **Video 2: Teaching Sample (~10m)** | **Official ITI Requirement** | Video Deliverables Specification | [Teaching Sample: Synchronous vs Asynchronous JavaScript](https://youtu.be/GUfWgL3hzOM); lecture plan in `teaching/video-teaching-script.md`. |
 | `ING-001` to `ING-008` | **Internal Story ID** | Engineering Implementation Plan (Epic 01) | Sub-tasks for document upload, chunking, and embedding. |
 | `RET-001` to `RET-006` | **Internal Story ID** | Engineering Implementation Plan (Epic 02) | Sub-tasks for hybrid search, RRF fusion, and refusal floor. |
 | `AGT-001` to `AGT-006` | **Internal Story ID** | Engineering Implementation Plan (Epic 03) | Sub-tasks for agent schemas, supervisor state machine, and tools. |
@@ -331,8 +331,8 @@ In accordance with strict verification standards, the following areas of partial
 - [Stretch Challenges & Answer Key (`teaching/stretch-challenges.md`)](./stretch-challenges.md): Advanced engineering extensions.
 - [Expected Outputs (`teaching/expected-outputs.md`)](./expected-outputs.md): Verbatim terminal logs and JSON fixtures.
 - [Common Mistakes Guide (`teaching/common-mistakes.md`)](./common-mistakes.md): 5 trainee misconceptions and architectural corrections.
-- [Video Teaching Script (`teaching/video-teaching-script.md`)](./video-teaching-script.md): Technical script for the 10-minute masterclass video (`VIDEO-002`).
-- [Video Demo Script (`teaching/video-demo-script.md`)](./video-demo-script.md): Storyboard and narration script for the product demo (`VIDEO-001`).
+- [Video Teaching Script (`teaching/video-teaching-script.md`)](./video-teaching-script.md): Technical script for the 10-minute masterclass video (`VIDEO-002`). Teaching sample available: [YouTube](https://youtu.be/GUfWgL3hzOM) (*Synchronous vs Asynchronous JavaScript*).
+- [Video Demo Script (`teaching/video-demo-script.md`)](./video-demo-script.md): Storyboard and narration script for the product demo (`VIDEO-001`). Product demo recording: [Google Drive](https://drive.google.com/file/d/1nzAQoCzD6WQtQ61tOoe5pSrktGN54r99/view?usp=drive_link).
 - [Business Requirements Document (`docs/BRD.md`)](file:///c:/Users/LOQ/domain-copilot/docs/BRD.md): Clinical requirements and domain rules.
 - [System Design Document (`docs/SYSTEM-DESIGN.md`)](file:///c:/Users/LOQ/domain-copilot/docs/SYSTEM-DESIGN.md): Detailed component architecture and trade-offs.
 - [Architecture Document (`docs/ARCHITECTURE.md`)](file:///c:/Users/LOQ/domain-copilot/docs/ARCHITECTURE.md): C4 structural diagrams, trust boundaries, and ITI traceability.

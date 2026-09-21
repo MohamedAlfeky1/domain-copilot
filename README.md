@@ -384,23 +384,21 @@ The application expects a configured active variant rather than placeholder valu
 
 ## Video Deliverables
 
-The repository contains the scripts and supporting material for the required videos.
+### Product Demo
 
-### Product Demonstration
+Domain Copilot product demonstration:
 
-**VIDEO-001:** 5–8 minute product demonstration
+https://drive.google.com/file/d/1nzAQoCzD6WQtQ61tOoe5pSrktGN54r99/view?usp=drive_link
 
-See:
+See the storyboard and narration script in [`teaching/video-demo-script.md`](teaching/video-demo-script.md).
 
-[`teaching/video-demo-script.md`](teaching/video-demo-script.md)
+### Teaching Sample
 
-### Technical Teaching Video
+A teaching video where I explain “Synchronous vs Asynchronous JavaScript” as part of a JavaScript educational series on YouTube:
 
-**VIDEO-002:** approximately 10 minutes
+https://youtu.be/GUfWgL3hzOM
 
-See:
-
-[`teaching/video-teaching-script.md`](teaching/video-teaching-script.md)
+See the Domain Copilot curriculum teaching session script and recording plan in [`teaching/video-teaching-script.md`](teaching/video-teaching-script.md).
 
 ## Project Documentation
 
