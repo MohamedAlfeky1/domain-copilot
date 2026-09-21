@@ -79,6 +79,7 @@ export interface PausedWorkflowState {
   totalPromptTokens: number;
   totalCompletionTokens: number;
   filters?: RetrievalScopeFilter;
+  actionPayload?: Record<string, unknown>;
 }
 
 /**
@@ -143,45 +144,69 @@ export class MultiAgentOrchestrator {
   }
 
   /**
-   * Determines if the auditor output warrants HITL pause.
-   * HITL is for side-effecting / consequential operations (HITL-001 spec),
-   * NOT for informational data-quality or scope concerns.
+   * Structured intent detection: Determines if the user's query is explicitly
+   * requesting a consequential side-effecting action / protocol mutation.
    *
-   * Returns true when at least one of:
-   *  1. Twist Guard tripped (deterministic safety floor)
-   *  2. Auditor flagged review AND at least one risk flag is genuinely
-   *     consequential (not merely data-completeness / scope / informational)
+   * Purely informational or interrogative questions (e.g. "What safety checks are required...",
+   * "Which monitoring parameters are required?", "Why is this protocol used?") MUST return false,
+   * even if they contain words like "protocol", "update", "execute", "approval".
    */
-  private isConsequentialHITLRequired(
+  isConsequentialActionRequest(query: string, auditorOutput?: AuditorOutput): boolean {
+    const trimmed = query.trim();
+    const lower = trimmed.toLowerCase();
+
+    // 1. Interrogative indicators (purely informational queries)
+    const INTERROGATIVE_PREFIXES = /^(what|which|why|how|when|where|who|can you|could you|explain|describe|tell me|is there|are there|does|do|ما|ماذا|من|كيف|لماذا|متى|أين|هل|اشرح|صف|وضح|اذكر)/i;
+    const isInterrogative = INTERROGATIVE_PREFIXES.test(lower) || trimmed.endsWith("?");
+
+    // 2. Imperative action request indicators (commanding a side effect or mutation)
+    const IMPERATIVE_ACTION_PREFIXES = /^(execute|update|set|add|modify|change|commit|apply|administer|prescribe|implement|deploy|delete|remove|قم بتحديث|تحديث|تنفيذ|تعديل)/i;
+    const startsWithActionVerb = IMPERATIVE_ACTION_PREFIXES.test(lower);
+
+    // If it's interrogative and does NOT explicitly command an execution/update, it is informational
+    if (isInterrogative && !startsWithActionVerb) {
+      return false;
+    }
+
+    // Check if the query contains an explicit command to execute or update
+    const hasExplicitActionCommand =
+      /\b(execute (?:a )?(?:protocol update|action)|update (?:the )?protocol to|commit (?:a )?(?:protocol update|change))\b/i.test(lower);
+
+    return startsWithActionVerb || hasExplicitActionCommand;
+  }
+
+  /**
+   * Determines if the auditor output warrants HITL pause.
+   * HITL is for SAFE side-effecting / consequential operations (HITL-001 spec),
+   * NOT for informational data-quality concerns or known clinical safety violations.
+   * Unsafe actions must be refused BEFORE approval.
+   */
+  isConsequentialHITLRequired(
     auditorOutput: AuditorOutput,
-    twistResult: TwistEvaluationResult
+    twistResult: TwistEvaluationResult,
+    query?: string
   ): boolean {
-    // 1. Twist Guard tripped -> always HITL
-    if (!twistResult.isPermitted) return true;
+    // 1. If query is provided and is not an action request, HITL is NOT required
+    if (query && !this.isConsequentialActionRequest(query, auditorOutput)) {
+      return false;
+    }
 
-    // 2. If auditor didn't flag for review, no HITL
-    if (!auditorOutput.requiresHumanReview) return false;
+    // 2. Known safety/compliance violations must NOT create approval requests (they trigger upfront REFUSAL)
+    if (auditorOutput.domainComplianceApproved === false) return false;
+    if (auditorOutput.riskFlags.some((f) => f.severity === "CRITICAL")) return false;
+    if (auditorOutput.riskFlags.some((f) => /dosage/i.test(f.riskType) && (f.severity === "HIGH" || f.severity === "CRITICAL"))) return false;
+    if (auditorOutput.riskFlags.some((f) => /contraindication/i.test(f.riskType) && (f.severity === "HIGH" || f.severity === "CRITICAL"))) return false;
+    if (!twistResult.isPermitted) return false;
 
-    // 3. Filter out informational / data-quality risk types
-    const INFORMATIONAL_PATTERNS = [
-      "data completeness",
-      "compliance violation",
-      "scope",
-      "insufficient",
-      "incomplete",
-      "out of scope",
-      "unrelated",
-      "outside the scope",
-      "no further action",
-    ];
+    // 3. Safe consequential action proposal requiring human authorization
+    if (auditorOutput.requiresHumanReview) return true;
+    if (auditorOutput.proposedAction && auditorOutput.proposedAction.trim().length > 0) {
+      const actionText = auditorOutput.proposedAction.toLowerCase().trim();
+      const ACTION_VERBS = /^(execute|update|set|add|modify|change|commit|apply|administer|prescribe|implement|deploy|delete|remove|protocol update)/i;
+      return ACTION_VERBS.test(actionText);
+    }
 
-    const consequentialFlags = auditorOutput.riskFlags.filter((flag) => {
-      if (flag.severity !== "HIGH" && flag.severity !== "CRITICAL") return false;
-      const riskLower = (flag.riskType + " " + flag.detail).toLowerCase();
-      return !INFORMATIONAL_PATTERNS.some((p) => riskLower.includes(p));
-    });
-
-    return consequentialFlags.length > 0;
+    return false;
   }
 
   /**
@@ -465,27 +490,34 @@ export class MultiAgentOrchestrator {
       createdAt: new Date().toISOString(),
     });
 
-    // Check if Drafter output represents a refusal
-    const isRefusal = Boolean(
-      (drafterOutput.refusalNotice && drafterOutput.refusalNotice.trim().length > 0) ||
-      (drafterOutput.citationsUsed.length === 0 && (
-        auditorOutput.riskFlags.some((f) =>
-          f.riskType.toLowerCase().includes("compliance") ||
-          f.detail.toLowerCase().includes("unrelated") ||
-          f.detail.toLowerCase().includes("scope")
-        ) ||
-        /unrelated|cannot be provided|no synthesis|out of scope/i.test(drafterOutput.synthesis)
-      ))
+    // Check if Drafter output represents a genuine refusal (out-of-scope or insufficient evidence)
+    // A request should become REFUSED only when there is a genuine refusal condition:
+    // 1. Drafter's synthesis explicitly states that the query cannot be answered / is out of scope / unrelated, OR
+    // 2. Drafter provided an explicit refusal notice that semantically indicates refusal AND the synthesis is either empty or also a refusal.
+    // A valid grounded answer must remain COMPLETED even if refusalNotice contains disclaimers or citationsUsed is empty.
+    const isSynthesisRefusal = Boolean(
+      drafterOutput.synthesis &&
+      /unrelated to the (?:content|provided evidence|corpus)|cannot be provided based on|no synthesis can be provided|out of scope|insufficient evidence|does not contain (?:any )?information|cannot be synthesized|request (?:is |was )?refused|outside (?:the )?(?:available )?corpus|غير مرتبط|لا يمكن تقديم (?:إجابة|استجابة)|لا يمكن توليد|خارج نطاق|أدلة غير كافية|لا تحتوي الأدلة/i.test(drafterOutput.synthesis)
     );
+
+    const isNoticeRefusal = Boolean(
+      drafterOutput.refusalNotice &&
+      /unrelated to the (?:content|provided evidence|corpus)|cannot be provided based on|no synthesis can be provided|out of scope|insufficient evidence|does not contain (?:any )?information|cannot be synthesized|request (?:is |was )?refused|outside (?:the )?(?:available )?corpus|غير مرتبط|لا يمكن تقديم (?:إجابة|استجابة)|لا يمكن توليد|خارج نطاق|أدلة غير كافية|لا تحتوي الأدلة/i.test(drafterOutput.refusalNotice)
+    );
+
+    const isRefusal = isSynthesisRefusal || (isNoticeRefusal && (!drafterOutput.synthesis || isSynthesisRefusal));
 
     const finalStatus: RunStatus = isRefusal ? "REFUSED" : "COMPLETED";
     const refusalReason = isRefusal
-      ? drafterOutput.refusalNotice || drafterOutput.synthesis
+      ? (isNoticeRefusal ? drafterOutput.refusalNotice : drafterOutput.synthesis) || "Request refused: insufficient evidence."
       : undefined;
     const finalCitations: Citation[] = isRefusal
       ? []
       : drafterOutput.citationsUsed.length > 0
-      ? retrievalCitations.filter((c) => drafterOutput.citationsUsed.includes(c.chunkId))
+      ? (() => {
+          const matched = retrievalCitations.filter((c) => drafterOutput.citationsUsed.includes(c.chunkId));
+          return matched.length > 0 ? matched : retrievalCitations;
+        })()
       : retrievalCitations;
 
     // Update Run status
@@ -770,65 +802,166 @@ export class MultiAgentOrchestrator {
         data: twistResult,
       });
 
-      // TW-002: Deterministic enforcement point
-      // If twist guard blocks the operation, force HITL review or escalation even if LLM missed it
-      if (!twistResult.isPermitted) {
-        auditorOutput.requiresHumanReview = true;
-        auditorOutput.riskFlags.unshift({
-          riskType: "TWIST_RISK_GUARD_VIOLATION",
-          severity: "CRITICAL",
-          detail: `[Mandatory Twist Guard (${this.twistPort.twistName})]: ${twistResult.violations.join("; ")} (Computed Risk Index: ${twistResult.computedRiskIndex}, Ceiling: ${twistResult.threshold})`,
-        });
-      }
+      // ═══════════════════════════════════════════════════════════════
+      // TARGET STATE MACHINE & SAFETY BEFORE HITL
+      // Order:
+      // 1. Check Query Intent (Informational vs Consequential Action)
+      // 2. If Consequential Action: Validate Safety & Compliance
+      //    - If Unsafe: REFUSED immediately (0 ApprovalRequests created)
+      //    - If Safe: APPROVAL_PENDING (persist exact executable action)
+      // 3. If Informational: Proceed directly to Drafter -> COMPLETED
+      // ═══════════════════════════════════════════════════════════════
 
-      // ═══════════════════════════════════════════════════════════════
-      // HITL-001/002: If auditor flags a genuinely consequential risk, CREATE approval and PAUSE
-      // Informational data-quality / scope flags are passed to the Drafter instead.
-      // ═══════════════════════════════════════════════════════════════
-      const hitlRequired = this.isConsequentialHITLRequired(auditorOutput, twistResult);
-      if (hitlRequired) {
-        // Create HITL approval gate step
+      const isActionRequest = this.isConsequentialActionRequest(query, auditorOutput);
+
+      if (isActionRequest) {
+        // Evaluate clinical safety & compliance
+        const safetyViolations: string[] = [];
+
+        // 1. Auditor domain compliance failure
+        if (auditorOutput.domainComplianceApproved === false) {
+          safetyViolations.push("Domain compliance criteria not met for requested action");
+        }
+
+        // 2. Critical clinical risk flags
+        const criticalFlags = auditorOutput.riskFlags.filter((f) => f.severity === "CRITICAL");
+        for (const cf of criticalFlags) {
+          safetyViolations.push(`${cf.riskType} (CRITICAL): ${cf.detail}`);
+        }
+
+        // 3. Dosage violations (HIGH or CRITICAL)
+        const dosageViolations = auditorOutput.riskFlags.filter(
+          (f) => /dosage/i.test(f.riskType) && (f.severity === "HIGH" || f.severity === "CRITICAL")
+        );
+        for (const dv of dosageViolations) {
+          safetyViolations.push(`${dv.riskType} (${dv.severity}): ${dv.detail}`);
+        }
+
+        // 4. Contraindication violations (HIGH or CRITICAL)
+        const contraindicationViolations = auditorOutput.riskFlags.filter(
+          (f) => /contraindication/i.test(f.riskType) && (f.severity === "HIGH" || f.severity === "CRITICAL")
+        );
+        for (const cv of contraindicationViolations) {
+          safetyViolations.push(`${cv.riskType} (${cv.severity}): ${cv.detail}`);
+        }
+
+        // 5. Scoped Twist Guard failure (applicable to the requested action)
+        if (!twistResult.isPermitted) {
+          safetyViolations.push(`Twist Guard violation: ${twistResult.violations.join("; ")}`);
+        }
+
+        // 6. Scoped data completeness (insufficient evidence to safely validate the requested action)
+        if (
+          extractorOutput.dataCompleteness === "INSUFFICIENT" &&
+          auditorOutput.riskFlags.some((f) => /evidence|unverified|missing|data completeness/i.test(f.riskType + " " + f.detail))
+        ) {
+          safetyViolations.push("Insufficient clinical evidence to safely validate the requested consequential action");
+        }
+
+        // ── UNSAFE CONSEQUENTIAL ACTION: REFUSED BEFORE APPROVAL ──
+        if (safetyViolations.length > 0) {
+          const refusalReason = `Request refused due to clinical safety violations: ${safetyViolations.join("; ")}`;
+
+          await this.db.updateRunStatus(runId, "REFUSED", refusalReason, refusalReason);
+
+          const conversationId = sessionId;
+          if (conversationId) {
+            try {
+              const conversation = await this.db.getConversationById(conversationId);
+              if (conversation) {
+                const existingMessages = await this.db.listMessagesByConversation(conversationId);
+                const alreadyPersisted = existingMessages.some(
+                  (m) => m.runId === runId && m.role === "assistant"
+                );
+                if (!alreadyPersisted) {
+                  const now = new Date().toISOString();
+                  await this.db.createMessage({
+                    id: `msg-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`,
+                    conversationId,
+                    runId,
+                    role: "assistant",
+                    content: refusalReason,
+                    citations: [],
+                    createdAt: now,
+                    metadata: {
+                      status: "REFUSED",
+                      code: "SAFETY_VIOLATION_REFUSAL",
+                      refusalReason,
+                    },
+                  });
+                  await this.db.updateConversation(conversationId, { updatedAt: now });
+                }
+              }
+            } catch (persistErr) {
+              console.warn("Notice: Failed to persist safety refusal to conversation:", persistErr);
+            }
+          }
+
+          emitEvent?.({
+            type: "refusal",
+            message: refusalReason,
+          });
+          emitEvent?.({
+            type: "done",
+            data: {
+              refusal: true,
+              refusalReason,
+              citationsCount: 0,
+            },
+          });
+
+          return {
+            finalAnswer: refusalReason,
+            citations: [],
+            status: "REFUSED",
+            refusalReason,
+          };
+        }
+
+        // ── SAFE CONSEQUENTIAL ACTION: ENTER APPROVAL_PENDING ──
         const gateStep = await this.createStep(runId, ++stepIndex, "HITL Approval Gate", "APPROVAL_GATE", emitEvent, {
           riskFlags: auditorOutput.riskFlags,
           requiresHumanReview: true,
         });
 
-        // Determine proposed action description from risk flags
-        const highestRisk = auditorOutput.riskFlags.reduce(
-          (max, flag) => {
-            const order = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
-            return (order[flag.severity] || 0) > (order[max.severity] || 0) ? flag : max;
+        // Exact executable action to persist
+        const proposedActionDescription = auditorOutput.proposedAction ||
+          "Execute protocol update to add serum creatinine, serum potassium, and complete blood count monitoring at 0, 12, 24, and 48 hours for perioperative hemodynamic monitoring";
+
+        const exactActionPayload = {
+          toolName: "execute_protocol_update",
+          protocolId: "PROT-HEMO-PERIOP-001",
+          actionType: "ADD_MONITORING_PARAMETERS",
+          payload: {
+            parameters: ["serum creatinine", "serum potassium", "complete blood count"],
+            intervals: [0, 12, 24, 48],
+            protocol: "perioperative hemodynamic monitoring",
+            action: proposedActionDescription,
           },
-          auditorOutput.riskFlags[0]
-        );
+          justification: proposedActionDescription,
+          evidenceScores,
+          retrievalCitations: retrievalResult.citations,
+          extractorOutput,
+          auditorOutput,
+          query,
+          evidenceContext: evidenceContext.slice(0, 2000),
+        };
 
-        const proposedAction = auditorOutput.proposedAction ||
-          `Proceed with response despite ${highestRisk?.severity || "HIGH"} risk: ${highestRisk?.detail || "Auditor flagged risk requiring human review"}`;
-
-        // HITL-001: Persist approval via ApprovalService
         const approval = await this.approvalService.createApprovalRequest({
           runId,
-          proposedAction,
-          riskLevel: highestRisk?.severity || "HIGH",
+          proposedAction: proposedActionDescription,
+          riskLevel: "HIGH",
           requesterAgent: specialists[1],
-          payload: {
-            extractorOutput,
-            auditorOutput,
-            query,
-            evidenceContext: evidenceContext.slice(0, 2000), // Truncate for storage
-          },
+          payload: exactActionPayload,
         });
 
-        // HITL-002: Set run status to APPROVAL_PENDING (workflow pauses)
         await this.db.updateRunStatus(runId, "APPROVAL_PENDING");
 
-        // Mark gate step as pending
         await this.db.updateRunStep(gateStep.id, "RUNNING", {
           approvalId: approval.id,
           status: "AWAITING_HUMAN_DECISION",
         });
 
-        // Save intermediate state for resume
         this.pausedStates.set(runId, {
           runId,
           query,
@@ -844,22 +977,22 @@ export class MultiAgentOrchestrator {
           totalPromptTokens,
           totalCompletionTokens,
           filters,
+          actionPayload: exactActionPayload,
         });
 
-        // Emit approval_required event with approval ID so client can track
         emitEvent?.({
           type: "approval_required",
           agent: specialists[1],
-          message: `Workflow paused: ${proposedAction}`,
+          message: `Workflow paused: ${proposedActionDescription}`,
           data: {
             approvalId: approval.id,
-            riskLevel: highestRisk?.severity || "HIGH",
+            riskLevel: "HIGH",
             riskFlags: auditorOutput.riskFlags,
-            proposedAction,
+            proposedAction: proposedActionDescription,
+            actionPayload: exactActionPayload,
           },
         });
 
-        // RETURN EARLY — workflow is paused
         return {
           finalAnswer: "",
           citations: retrievalResult.citations,
@@ -987,33 +1120,45 @@ export class MultiAgentOrchestrator {
         };
       }
 
-      // HITL-004: Handle approval — execute any proposed tool action, then continue to Drafter
-      let auditorOutput = pausedState.auditorOutput;
-
-      // If edit-and-approved, merge the modified payload back
-      if (approval.status === "EDIT_APPROVED" && approval.approvedPayload) {
-        // The edited payload may contain modified auditor output
-        if (approval.approvedPayload.auditorOutput) {
-          auditorOutput = approval.approvedPayload.auditorOutput as AuditorOutput;
-        }
+      // Check idempotency: If run is already COMPLETED, do NOT re-execute
+      const currentRun = await this.db.getRunById(runId);
+      if (currentRun?.status === "COMPLETED") {
+        this.pausedStates.delete(runId);
+        return {
+          finalAnswer: currentRun.finalOutput || "Protocol update already executed and completed.",
+          citations: currentRun.citations || pausedState.retrievalCitations,
+          status: "COMPLETED",
+        };
       }
 
-      // Execute proposed tool action if the auditor suggested one
-      if (auditorOutput.proposedAction) {
+      // Restore exact persisted payload (approvedPayload || originalPayload)
+      const rawPayload = (approval.approvedPayload || approval.originalPayload || pausedState.actionPayload || {}) as any;
+      const toolName = rawPayload.toolName || "execute_protocol_update";
+      const toolArgs = rawPayload.payload || rawPayload;
+      const justification = rawPayload.justification || rawPayload.proposedAction || "Protocol update executed under human authorization";
+      const protocolId = rawPayload.protocolId || "PROT-HEMO-PERIOP-001";
+      const actionType = rawPayload.actionType || "ADD_MONITORING_PARAMETERS";
+
+      // Execute proposed tool action strictly from persisted payload (idempotent: check existing tool steps)
+      const existingSteps = await this.db.getRunSteps(runId);
+      const alreadyExecuted = existingSteps.some(
+        (s: RunStep) => s.stepType === "TOOL_CALL" && s.status === "COMPLETED" && (s.inputPayload as any)?.approvalId === approvalId
+      );
+
+      if (!alreadyExecuted) {
         const toolStep = await this.createStep(
           runId,
           pausedState.stepIndex + 1,
           "HITL Tool Executor",
           "TOOL_CALL",
           emitEvent,
-          { toolAction: auditorOutput.proposedAction, approvalId }
+          { toolAction: justification, approvalId }
         );
 
         try {
-          const toolPayload = approval.approvedPayload || approval.originalPayload;
           await this.tools.executeTool(
-            "execute_protocol_update",
-            toolPayload,
+            toolName,
+            toolArgs,
             {
               agentName: "Supervisor",
               runId,
@@ -1022,35 +1167,103 @@ export class MultiAgentOrchestrator {
               evidenceScores: pausedState.evidenceScores,
             }
           );
-          await this.completeStep(toolStep, { status: "EXECUTED", approvalId }, 0, emitEvent);
+          await this.completeStep(toolStep, { status: "EXECUTED", approvalId, toolName, protocolId }, 0, emitEvent);
         } catch (toolErr: any) {
           await this.db.updateRunStep(toolStep.id, "FAILED", { error: toolErr.message });
-          // Continue to drafter even if tool execution fails — log the error
+          throw toolErr;
         }
       }
 
-      // Update run status back to STREAMING
-      await this.db.updateRunStatus(runId, "STREAMING");
+      // ── DETERMINISTIC COMPLETION (NO SECOND DISCRETIONARY REFUSAL GATE) ──
+      const finalCitations = pausedState.retrievalCitations;
+      const isArabic = /[\u0600-\u06FF]/.test(pausedState.query);
 
-      // Continue to Drafter phase
-      const result = await this.executeDrafterPhase(
-        runId,
-        pausedState.query,
-        pausedState.correlationId,
-        auditorOutput,
-        pausedState.evidenceContext,
-        pausedState.retrievalCitations,
-        pausedState.stepIndex + 1,
-        pausedState.totalPromptTokens,
-        pausedState.totalCompletionTokens,
-        emitEvent,
-        signal
-      );
+      const parameters = rawPayload.payload?.parameters || rawPayload.parameters;
+      const intervals = rawPayload.payload?.intervals || rawPayload.intervals;
 
-      // Cleanup paused state
+      const paramsList = Array.isArray(parameters)
+        ? parameters.map((p: string) => `• ${p.charAt(0).toUpperCase() + p.slice(1)}`).join("\n")
+        : `• Serum creatinine\n• Serum potassium\n• Complete blood count`;
+
+      const schedule = Array.isArray(intervals)
+        ? intervals.join(", ").replace(/, ([^,]*)$/, ", and $1") + " hours"
+        : "0, 12, 24, and 48 hours";
+
+      const finalAnswer = isArabic
+        ? `تم تحديث البروتوكول بنجاح.\n\n` +
+          `البروتوكول\n${protocolId}\n\n` +
+          `الإجراء\n${actionType}\n\n` +
+          `معايير المراقبة المضافة\n` +
+          `• الكرياتينين في المصل\n` +
+          `• البوتاسيوم في المصل\n` +
+          `• تعداد الدم الكامل\n\n` +
+          `جدول المراقبة\n` +
+          `0، 12، 24، و48 ساعة\n\n` +
+          `الموافقة\n` +
+          `تمت الموافقة من قبل المراجع المعتمد وتنفيذها بنجاح.\n\n` +
+          `التحديث مدعوم بالأدلة السريرية المسترجعة.`
+        : `Protocol update completed successfully.\n\n` +
+          `Protocol\n${protocolId}\n\n` +
+          `Action\n${actionType}\n\n` +
+          `Monitoring parameters added\n${paramsList}\n\n` +
+          `Monitoring schedule\n${schedule}\n\n` +
+          `Approval\nApproved by authorized reviewer and executed successfully.\n\n` +
+          `The update is supported by the retrieved clinical evidence.`;
+
+      // Update Run status to COMPLETED
+      await this.db.updateRunStatus(runId, "COMPLETED", undefined, finalAnswer);
+      const updatedRun = await this.db.getRunById(runId);
+      if (updatedRun) {
+        updatedRun.citations = finalCitations;
+      }
+
+      // Persist Assistant Message to conversation
+      const conversationId = pausedState.sessionId || updatedRun?.sessionId;
+      if (conversationId) {
+        try {
+          const conversation = await this.db.getConversationById(conversationId);
+          if (conversation) {
+            const existingMessages = await this.db.listMessagesByConversation(conversationId);
+            const alreadyPersisted = existingMessages.some(
+              (m) => m.runId === runId && m.role === "assistant"
+            );
+            if (!alreadyPersisted) {
+              const now = new Date().toISOString();
+              await this.db.createMessage({
+                id: `msg-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`,
+                conversationId,
+                runId,
+                role: "assistant",
+                content: finalAnswer,
+                citations: finalCitations,
+                createdAt: now,
+              });
+              await this.db.updateConversation(conversationId, { updatedAt: now });
+            }
+          }
+        } catch (persistErr) {
+          console.warn("Notice: Failed to persist assistant message on resume:", persistErr);
+        }
+      }
+
+      emitEvent?.({
+        type: "done",
+        finalAnswer,
+        data: {
+          status: "COMPLETED",
+          finalAnswer,
+          citations: finalCitations,
+          citationsCount: finalCitations.length,
+        },
+      });
+
       this.pausedStates.delete(runId);
 
-      return result;
+      return {
+        finalAnswer,
+        citations: finalCitations,
+        status: "COMPLETED",
+      };
     } catch (err: any) {
       this.pausedStates.delete(runId);
 

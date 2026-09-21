@@ -109,18 +109,18 @@ You MUST respond with valid JSON matching this exact schema:
     }
   ],
   "domainComplianceApproved": <true if findings meet compliance criteria, false otherwise>,
-  "requiresHumanReview": <true ONLY if a side-effecting action or unverified dosage/drug-interaction claim is being PROPOSED, NOT merely described>,
-  "proposedAction": "<optional: recommended action if compliance fails>"
+  "requiresHumanReview": <true ONLY if a side-effecting action is being PROPOSED and is clinically safe/compliant; false for informational queries or unsafe actions>,
+  "proposedAction": "<optional: description of the proposed action if an action was explicitly requested>"
 }
 
 Rules:
 - Flag any claim that violates the domain risk policy.
-- For unsafe dosing, unverified dosage calculation without weight/renal parameters, or therapeutic ceiling breaches, set riskType to "Dosage Violation" with severity HIGH or CRITICAL.
-- For dangerous drug-drug interactions or contraindications, set riskType to "Contraindication" with severity HIGH or CRITICAL.
-- Set requiresHumanReview to true ONLY if a side-effecting action, unverified drug interaction, or off-label dosage claim is being PROPOSED (not merely discussed or described).
-- Do NOT set requiresHumanReview to true for data completeness concerns, scope violations, or purely informational queries that describe clinical facts without proposing an action.
-- Set domainComplianceApproved to false if policy violations are found.
-- Be conservative about ACTIONS: when uncertain about a proposed action, flag for human review. Do NOT flag purely informational responses for human review.
+- For unsafe dosing, unverified dosage calculation without weight/renal parameters, or therapeutic ceiling breaches, set riskType to "Dosage Violation" with severity HIGH or CRITICAL, and set domainComplianceApproved to false.
+- For dangerous drug-drug interactions or contraindications, set riskType to "Contraindication" with severity HIGH or CRITICAL, and set domainComplianceApproved to false.
+- For informational queries (e.g. asking "What...", "Which...", "Why...", "How...", or describing clinical facts/protocols without commanding an action): set requiresHumanReview to false, do NOT populate proposedAction with the query topic, and set domainComplianceApproved to true if the clinical facts are accurate.
+- Do NOT set requiresHumanReview to true for data completeness concerns, scope violations, or purely informational queries.
+- Set requiresHumanReview to true ONLY when a safe, compliant consequential action is being PROPOSED and needs human authorization.
+- Set domainComplianceApproved to false if policy violations or safety limits are breached.
 - Respond with ONLY the JSON object, no markdown fences, no explanation.`;
 }
 

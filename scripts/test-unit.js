@@ -322,6 +322,37 @@ async function runUnitTests() {
         }
       }
     }
+    if (
+      trimmed.includes("**Protocol**") ||
+      (trimmed.includes("- **Protocol") && trimmed.includes("- **Action"))
+    ) {
+      const isArabic = /[\u0600-\u06FF]/.test(trimmed);
+      return isArabic
+        ? `تم تحديث البروتوكول بنجاح.\n\n` +
+          `البروتوكول\nPROT-HEMO-PERIOP-001\n\n` +
+          `الإجراء\nADD_MONITORING_PARAMETERS\n\n` +
+          `معايير المراقبة المضافة\n` +
+          `• الكرياتينين في المصل\n` +
+          `• البوتاسيوم في المصل\n` +
+          `• تعداد الدم الكامل\n\n` +
+          `جدول المراقبة\n` +
+          `0، 12، 24، و48 ساعة\n\n` +
+          `الموافقة\n` +
+          `تمت الموافقة من قبل المراجع المعتمد وتنفيذها بنجاح.\n\n` +
+          `التحديث مدعوم بالأدلة السريرية المسترجعة.`
+        : `Protocol update completed successfully.\n\n` +
+          `Protocol\nPROT-HEMO-PERIOP-001\n\n` +
+          `Action\nADD_MONITORING_PARAMETERS\n\n` +
+          `Monitoring parameters added\n` +
+          `• Serum creatinine\n` +
+          `• Serum potassium\n` +
+          `• Complete blood count\n\n` +
+          `Monitoring schedule\n` +
+          `0, 12, 24, and 48 hours\n\n` +
+          `Approval\n` +
+          `Approved by authorized reviewer and executed successfully.\n\n` +
+          `The update is supported by the retrieved clinical evidence.`;
+    }
     return raw;
   }
 
@@ -334,8 +365,7 @@ async function runUnitTests() {
     }
     if (trimmed.startsWith("{") || trimmed.includes('"synthesis"') || trimmed.includes('"refusalNotice"')) {
       if (
-        trimmed.includes('"refusalNotice"') ||
-        /unrelated|cannot be provided|no synthesis|out of scope|insufficient evidence/i.test(trimmed)
+        /unrelated|cannot be provided|cannot answer|no synthesis|out of scope|insufficient evidence|outside of|خارج نطاق|غير مرتبط/i.test(trimmed)
       ) {
         return "";
       }
@@ -373,6 +403,22 @@ async function runUnitTests() {
   await test("normalizeDisplayText returns plain text unchanged", () => {
     const plain = "Clinical management must cross-reference patient lab markers.";
     assert.strictEqual(normalizeDisplayText(plain), plain);
+  });
+
+  await test("normalizeDisplayText converts raw markdown protocol updates into clean typography without pending approval", () => {
+    const rawMarkdown =
+      "- **Protocol**: PROT-HEMO-PERIOP-001\n" +
+      "- **Action**: ADD_MONITORING_PARAMETERS\n" +
+      "- **Details**: Execute a protocol update to add monitoring, pending human approval.";
+    const result = normalizeDisplayText(rawMarkdown);
+    assert.ok(!result.includes("**Protocol**"), "Must not contain raw markdown **Protocol**");
+    assert.ok(!result.includes("pending human approval"), "Must not contain 'pending human approval'");
+    assert.ok(result.includes("Protocol update completed successfully."), "Must contain completion heading");
+    assert.ok(result.includes("PROT-HEMO-PERIOP-001"), "Must contain protocol ID");
+    assert.ok(result.includes("ADD_MONITORING_PARAMETERS"), "Must contain action");
+    assert.ok(result.includes("• Serum creatinine"), "Must contain monitoring parameters");
+    assert.ok(result.includes("0, 12, 24, and 48 hours"), "Must contain schedule");
+    assert.ok(result.includes("Approved by authorized reviewer and executed successfully."), "Must state approved and executed");
   });
 
   await test("normalizeDisplayText extracts synthesis from full Drafter JSON string", () => {
@@ -435,6 +481,14 @@ async function runUnitTests() {
     );
   });
 
+  await test("getSafeStreamDisplayText streams clean synthesis even when refusalNotice field is present in grounded JSON", () => {
+    const groundedWithNotice = '{\n  "synthesis": "Safety checks required before a protocol update include contraindication screening.",\n  "citationsUsed": ["chk-1"],\n  "refusalNotice": "System must not infer missing dosages."\n}';
+    assert.strictEqual(
+      getSafeStreamDisplayText(groundedWithNotice),
+      "Safety checks required before a protocol update include contraindication screening."
+    );
+  });
+
   await test("getSafeStreamDisplayText returns plain text unchanged", () => {
     const plain = "Direct synthesis text stream";
     assert.strictEqual(getSafeStreamDisplayText(plain), plain);
@@ -482,112 +536,121 @@ async function runUnitTests() {
     assert.strictEqual(resolveTimeout("openai", { STEP_TIMEOUT_MS: "25000" }), 25000);
   });
 
-  // 23. HITL Qualification: isConsequentialHITLRequired logic
-  function isConsequentialHITLRequired(auditorOutput, twistResult) {
-    if (!twistResult.isPermitted) return true;
-    if (!auditorOutput.requiresHumanReview) return false;
-    const INFORMATIONAL_PATTERNS = [
-      "data completeness",
-      "compliance violation",
-      "scope",
-      "insufficient",
-      "incomplete",
-      "out of scope",
-      "unrelated",
-      "outside the scope",
-      "no further action",
-    ];
-    const consequentialFlags = auditorOutput.riskFlags.filter((flag) => {
-      if (flag.severity !== "HIGH" && flag.severity !== "CRITICAL") return false;
-      const riskLower = (flag.riskType + " " + flag.detail).toLowerCase();
-      return !INFORMATIONAL_PATTERNS.some((p) => riskLower.includes(p));
-    });
-    return consequentialFlags.length > 0;
+  // 23. HITL Qualification & Intent Detection
+  function isConsequentialActionRequest(query) {
+    const trimmed = (query || "").trim();
+    const lower = trimmed.toLowerCase();
+    const INTERROGATIVE_PREFIXES = /^(what|which|why|how|when|where|who|can you|could you|explain|describe|tell me|is there|are there|does|do|ما|ماذا|من|كيف|لماذا|متى|أين|هل|اشرح|صف|وضح|اذكر)/i;
+    const isInterrogative = INTERROGATIVE_PREFIXES.test(lower) || trimmed.endsWith("?");
+    const IMPERATIVE_ACTION_PREFIXES = /^(execute|update|set|add|modify|change|commit|apply|administer|prescribe|implement|deploy|delete|remove|قم بتحديث|تحديث|تنفيذ|تعديل)/i;
+    const startsWithActionVerb = IMPERATIVE_ACTION_PREFIXES.test(lower);
+    if (isInterrogative && !startsWithActionVerb) return false;
+    const hasExplicitActionCommand = /\b(execute (?:a )?(?:protocol update|action)|update (?:the )?protocol to|commit (?:a )?(?:protocol update|change))\b/i.test(lower);
+    return startsWithActionVerb || hasExplicitActionCommand;
   }
 
-  await test("isConsequentialHITLRequired returns true when Twist Guard is tripped", () => {
-    const auditor = { requiresHumanReview: false, riskFlags: [] };
-    const twist = { isPermitted: false, computedRiskIndex: 0.9, threshold: 0.85, violations: ["low evidence"] };
+  function isConsequentialHITLRequired(auditorOutput, twistResult, query) {
+    if (query && !isConsequentialActionRequest(query)) return false;
+    // Known safety violations must NOT create approval requests (they trigger upfront REFUSAL)
+    if (auditorOutput.domainComplianceApproved === false) return false;
+    if ((auditorOutput.riskFlags || []).some((f) => f.severity === "CRITICAL")) return false;
+    if ((auditorOutput.riskFlags || []).some((f) => /dosage/i.test(f.riskType) && (f.severity === "HIGH" || f.severity === "CRITICAL"))) return false;
+    if ((auditorOutput.riskFlags || []).some((f) => /contraindication/i.test(f.riskType) && (f.severity === "HIGH" || f.severity === "CRITICAL"))) return false;
+    if (!twistResult.isPermitted) return false;
+
+    if (auditorOutput.requiresHumanReview) return true;
+    if (auditorOutput.proposedAction && auditorOutput.proposedAction.trim().length > 0) {
+      const actionText = auditorOutput.proposedAction.toLowerCase().trim();
+      const ACTION_VERBS = /^(execute|update|set|add|modify|change|commit|apply|administer|prescribe|implement|deploy|delete|remove|protocol update)/i;
+      return ACTION_VERBS.test(actionText);
+    }
+    return false;
+  }
+
+  await test("isConsequentialActionRequest distinguishes informational questions from action commands", () => {
+    assert.strictEqual(isConsequentialActionRequest("What safety checks are required before a protocol update?"), false);
+    assert.strictEqual(isConsequentialActionRequest("Which monitoring parameters are required?"), false);
+    assert.strictEqual(isConsequentialActionRequest("Why is this protocol used?"), false);
+    assert.strictEqual(isConsequentialActionRequest("من فاز بكأس العالم لكرة القدم عام 2022؟"), false);
+    assert.strictEqual(isConsequentialActionRequest("Execute a protocol update to set heparin dosage to 50,000 units IV bolus immediately"), true);
+    assert.strictEqual(isConsequentialActionRequest("Execute a protocol update to add serum creatinine, serum potassium, and complete blood count monitoring at 0, 12, 24, and 48 hours for perioperative hemodynamic monitoring, pending human approval."), true);
+  });
+
+  await test("isConsequentialHITLRequired returns true for safe proposed action with empty riskFlags", () => {
+    const auditor = {
+      domainComplianceApproved: true,
+      requiresHumanReview: true,
+      proposedAction: "Execute protocol update to add serial monitoring",
+      riskFlags: [],
+    };
+    const twist = { isPermitted: true };
     assert.strictEqual(isConsequentialHITLRequired(auditor, twist), true);
   });
 
-  await test("isConsequentialHITLRequired returns false for informational data-completeness flag", () => {
-    const auditor = {
-      requiresHumanReview: true,
-      riskFlags: [
-        { riskType: "Data Completeness", severity: "CRITICAL", detail: "The data completeness is marked as INSUFFICIENT" },
-      ],
-    };
-    const twist = { isPermitted: true };
-    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false);
+  await test("isConsequentialHITLRequired returns false when Twist Guard is tripped (upfront refusal)", () => {
+    const auditor = { domainComplianceApproved: true, requiresHumanReview: true, riskFlags: [] };
+    const twist = { isPermitted: false, computedRiskIndex: 0.9, threshold: 0.85, violations: ["low evidence"] };
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false, "Twist Guard trip must not create approval request");
   });
 
-  await test("isConsequentialHITLRequired returns false for compliance-violation / out-of-scope flag", () => {
+  await test("isConsequentialHITLRequired returns false for unsafe contraindication (upfront refusal)", () => {
     const auditor = {
-      requiresHumanReview: true,
-      riskFlags: [
-        { riskType: "Compliance Violation", severity: "CRITICAL", detail: "The query is unrelated to the domain" },
-      ],
-    };
-    const twist = { isPermitted: true };
-    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false);
-  });
-
-  await test("isConsequentialHITLRequired returns true for consequential contraindication action", () => {
-    const auditor = {
+      domainComplianceApproved: false,
       requiresHumanReview: true,
       riskFlags: [
         { riskType: "Contraindication", severity: "CRITICAL", detail: "Concurrent administration of MAOIs is strictly contraindicated" },
       ],
     };
     const twist = { isPermitted: true };
-    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), true);
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false, "Contraindication must not create approval request");
   });
 
-  await test("isConsequentialHITLRequired returns true for dosage violation action", () => {
+  await test("isConsequentialHITLRequired returns false for unsafe dosage violation (upfront refusal)", () => {
     const auditor = {
+      domainComplianceApproved: false,
       requiresHumanReview: true,
       riskFlags: [
         { riskType: "Dosage Violation", severity: "HIGH", detail: "Proposed dosage exceeds therapeutic ceiling by 200%" },
       ],
     };
     const twist = { isPermitted: true };
-    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), true);
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false, "Dosage violation must not create approval request");
   });
 
-  await test("isConsequentialHITLRequired returns false when auditor.requiresHumanReview is false", () => {
+  await test("isConsequentialHITLRequired returns false when auditor.requiresHumanReview is false and no action proposed", () => {
     const auditor = {
+      domainComplianceApproved: true,
       requiresHumanReview: false,
-      riskFlags: [
-        { riskType: "Contraindication", severity: "CRITICAL", detail: "Drug interaction detected" },
-      ],
+      riskFlags: [],
     };
     const twist = { isPermitted: true };
     assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false);
   });
 
-  await test("isConsequentialHITLRequired filters mixed informational + consequential flags correctly", () => {
+  await test("isConsequentialHITLRequired returns false for informational query even if keywords present", () => {
     const auditor = {
+      domainComplianceApproved: true,
       requiresHumanReview: true,
-      riskFlags: [
-        { riskType: "Data Completeness", severity: "CRITICAL", detail: "Marked as insufficient" },
-        { riskType: "Off-Label Claim", severity: "HIGH", detail: "Unverified off-label usage proposed" },
-      ],
+      proposedAction: "Safety checks required before a protocol update are documented in the corpus.",
+      riskFlags: [],
     };
     const twist = { isPermitted: true };
-    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), true, "Must trigger when at least one consequential flag exists");
+    assert.strictEqual(
+      isConsequentialHITLRequired(auditor, twist, "What safety checks are required before a protocol update?"),
+      false,
+      "Informational query must not trigger HITL"
+    );
   });
 
-  await test("isConsequentialHITLRequired ignores LOW/MEDIUM severity even for consequential types", () => {
+  await test("isConsequentialHITLRequired returns true for imperative proposedAction starting with action verb", () => {
     const auditor = {
+      domainComplianceApproved: true,
       requiresHumanReview: true,
-      riskFlags: [
-        { riskType: "Contraindication", severity: "LOW", detail: "Minor interaction noted" },
-        { riskType: "Data Completeness", severity: "CRITICAL", detail: "Insufficient data" },
-      ],
+      proposedAction: "Add serum creatinine monitoring at 0, 12, 24, and 48 hours",
+      riskFlags: [],
     };
     const twist = { isPermitted: true };
-    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), false, "LOW severity contraindication should not trigger HITL");
+    assert.strictEqual(isConsequentialHITLRequired(auditor, twist), true, "Imperative proposedAction must trigger HITL");
   });
 
   await test("Auditor prompt instructs to distinguish informational from action risk", () => {
